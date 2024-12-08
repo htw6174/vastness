@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 // Gesture
@@ -13,7 +14,7 @@ when ODIN_OS == .Windows {
 GestureID :: distinct i64
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	RecordGesture          :: proc(touchId: ^TouchID)                 -> c.int ---
 	SaveAllDollarTemplates :: proc(dst: ^RWops)                       -> c.int ---
 	SaveDollarTemplate     :: proc(gestureId: GestureID, dst: ^RWops) -> c.int ---
@@ -229,7 +230,7 @@ HapticEffect :: struct #raw_union {
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	NumHaptics              :: proc() -> c.int ---
 	HapticName              :: proc(device_index: c.int) -> cstring ---
 	HapticOpen              :: proc(device_index: c.int) -> ^Haptic ---

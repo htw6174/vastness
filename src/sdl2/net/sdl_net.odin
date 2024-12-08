@@ -1,12 +1,13 @@
 package sdl2_net
 
-import "core:c"
+
+import c "vendor_c"
 import SDL ".."
 
 when ODIN_OS == .Windows {
 	foreign import lib "SDL2_net.lib"
 } else {
-	foreign import lib "system:SDL2_net"
+	foreign import lib "SDL2_net"
 }
 
 bool :: SDL.bool
@@ -27,7 +28,7 @@ INADDR_BROADCAST :: 0xFFFFFFFF
 
 
 @(default_calling_convention="c", link_prefix="SDLNet_")
-foreign lib {
+foreign {
 	Linked_Version :: proc() -> ^SDL.version ---
 
 	Init :: proc() -> c.int ---
@@ -46,7 +47,7 @@ foreign lib {
 TCPsocket :: distinct rawptr
 
 @(default_calling_convention="c", link_prefix="SDLNet_")
-foreign lib {
+foreign {
 	TCP_Open           :: proc(ip: ^IPaddress) -> TCPsocket ---
 	TCP_Accept         :: proc(server: TCPsocket) -> TCPsocket ---
 	TCP_GetPeerAddress :: proc(sock: TCPsocket) -> ^IPaddress ---
@@ -77,7 +78,7 @@ UDPpacket :: struct {
 /***********************************************************************/
 
 @(default_calling_convention="c", link_prefix="SDLNet_")
-foreign lib {
+foreign {
 	AllocPacket  :: proc(size: c.int) -> ^UDPpacket ---
 	ResizePacket :: proc(packet: ^UDPpacket, newsize: c.int) -> c.int ---
 	FreePacket   :: proc(packet: ^UDPpacket) ---
@@ -142,7 +143,7 @@ SocketReady :: #force_inline proc "c" (sock: rawptr) -> bool {
 
 
 @(default_calling_convention="c", link_prefix="SDLNet_")
-foreign lib {
+foreign {
 	AllocSocketSet :: proc(maxsockets: c.int) -> SocketSet ---
 	AddSocket      :: proc(set: SocketSet, sock: GenericSocket) -> c.int ---
 	DelSocket      :: proc(set: SocketSet, sock: GenericSocket) -> c.int ---
@@ -156,7 +157,7 @@ foreign lib {
 /***********************************************************************/
 
 @(default_calling_convention="c", link_prefix="SDLNet_")
-foreign lib {
+foreign {
 	SetError :: proc(fmt: cstring, #c_vararg args: ..any) ---
 	GetError :: proc() -> cstring ---
 }

@@ -1,12 +1,13 @@
 package sdl2_image
 
-import "core:c"
+
+import c "vendor_c"
 import SDL ".."
 
 when ODIN_OS == .Windows {
 	foreign import lib "SDL2_image.lib"
 } else {
-	foreign import lib "system:SDL2_image"
+	foreign import lib "SDL2_image"
 }
 
 bool :: SDL.bool
@@ -16,7 +17,7 @@ MINOR_VERSION :: 0
 PATCHLEVEL    :: 5
 
 @(default_calling_convention="c", link_prefix="IMG_")
-foreign lib {
+foreign {
 	Linked_Version :: proc() -> ^SDL.version ---
 }
 
@@ -49,7 +50,7 @@ SetError :: SDL.SetError
 GetError :: SDL.GetError
 
 @(default_calling_convention="c", link_prefix="IMG_")
-foreign lib {
+foreign {
 	Init :: proc(flags: InitFlags) -> InitFlags ---
 	Quit :: proc() ---
 

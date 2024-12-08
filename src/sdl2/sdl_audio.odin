@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 /**
@@ -129,7 +130,7 @@ AudioCVT :: struct #packed {
 AudioDeviceID :: distinct u32
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetNumAudioDrivers :: proc() -> c.int ---
 	GetAudioDriver     :: proc(index: c.int) -> cstring ---
 
@@ -160,7 +161,7 @@ AudioStatus :: enum c.int {
 	PAUSED,
 }
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetAudioStatus :: proc() -> AudioStatus ---
 	GetAudioDeviceStatus :: proc(dev: AudioDeviceID) -> AudioStatus --- /* Audio State */
 }
@@ -170,7 +171,7 @@ foreign lib {
 AudioStream :: struct {}
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	PauseAudio       :: proc(pause_on: bool) ---
 	PauseAudioDevice :: proc(dev: AudioDeviceID, pause_on: bool) --- /* Pause audio functions */
 }
@@ -185,7 +186,7 @@ LoadWAV :: #force_inline proc "c" (file: cstring, spec: ^AudioSpec, audio_buf: ^
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	LoadWAV_RW :: proc(src: ^RWops, freesrc: bool, spec: ^AudioSpec, audio_buf: ^[^]u8, audio_len: ^u32) -> ^AudioSpec ---
 	FreeWAV    :: proc(audio_buf: [^]u8) ---
 }
@@ -193,7 +194,7 @@ foreign lib {
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	BuildAudioCVT :: proc(cvt:          ^AudioCVT,
 	                      src_format:   AudioFormat,
 	                      src_channels: u8,
@@ -225,7 +226,7 @@ foreign lib {
 MIX_MAXVOLUME :: 128
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	MixAudio           :: proc(dst: [^]u8, src: [^]u8, len: u32, volume: c.int)                      ---
 	MixAudioFormat     :: proc(dst: [^]u8, src: [^]u8, format: AudioFormat, len: u32, volume: c.int) ---
 	QueueAudio         :: proc(dev: AudioDeviceID, data: rawptr, len: u32) -> c.int              ---

@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 bool :: distinct b32
@@ -22,7 +23,7 @@ realloc_func :: proc "c" (mem: rawptr, size: c.size_t) -> rawptr
 free_func    :: proc "c" (mem: rawptr)
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	malloc   :: proc(size: c.size_t)              -> rawptr ---
 	calloc   :: proc(nmemb, size: c.size_t)       -> rawptr ---
 	realloc  :: proc(mem: rawptr, size: c.size_t) -> rawptr ---
@@ -43,13 +44,13 @@ foreign lib {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	getenv :: proc(name: cstring) -> cstring ---
 	setenv :: proc(name, value: cstring, overwrite: c.int) -> c.int ---
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	isalpha  :: proc(x: rune) -> bool ---
 	isalnum  :: proc(x: rune) -> bool ---
 	isblank  :: proc(x: rune) -> bool ---
@@ -72,7 +73,7 @@ foreign lib {
 M_PI :: 3.14159265358979323846264338327950288
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	acos      :: proc(x: f64)           -> f64 ---
 	acosf     :: proc(x: f32)           -> f32 ---
 	asin      :: proc(x: f64)           -> f64 ---
@@ -127,7 +128,7 @@ ICONV_EINVAL :: ~c.size_t(3) // (size_t)-4
 iconv_t :: distinct rawptr
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	iconv_open   :: proc(tocode, fromcode: cstring) -> iconv_t ---
 	iconv_close  :: proc(cd: iconv_t) -> c.int ---
 	iconv        :: proc(cd: iconv_t, inbuf: ^cstring, inbytesleft: ^c.size_t, outbuf: ^[^]u8, outbytesleft: ^c.size_t) -> c.size_t ---

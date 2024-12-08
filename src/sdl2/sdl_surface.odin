@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 SWSURFACE       :: 0           /**< Just here for compatibility */
@@ -70,7 +71,7 @@ BlitScaled  :: UpperBlitScaled
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	CreateRGBSurface                  :: proc(flags: u32, width, height, depth: c.int, Rmask, Gmask, Bmask, Amask: u32) -> ^Surface ---
 	CreateRGBSurfaceWithFormat        :: proc(flags: u32, width, height, depth: c.int, format: u32) -> ^Surface ---
 	CreateRGBSurfaceFrom              :: proc(pixels: rawptr, width, height, depth, pitch: c.int, Rmask, Gmask, Bmask, Amask: u32) -> ^Surface ---

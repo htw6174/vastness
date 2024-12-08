@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 DisplayMode :: struct {
@@ -210,7 +211,7 @@ HitTest :: proc "c" (win: ^Window, area: ^Point, data: rawptr) -> HitTestResult
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetNumVideoDrivers       :: proc() -> c.int ---
 	GetVideoDriver           :: proc(index: c.int) -> cstring ---
 	VideoInit                :: proc(driver_name: cstring) -> c.int ---
@@ -287,7 +288,7 @@ foreign lib {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GL_LoadLibrary           :: proc(path: cstring) -> c.int ---
 	GL_GetProcAddress        :: proc(procedure: cstring) -> rawptr ---
 	GL_UnloadLibrary         :: proc() ---

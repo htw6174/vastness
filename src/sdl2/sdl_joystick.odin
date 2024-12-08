@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 Joystick :: struct {}
@@ -55,7 +56,7 @@ HAT_LEFTUP    :: HAT_LEFT|HAT_UP
 HAT_LEFTDOWN  :: HAT_LEFT|HAT_DOWN
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	LockJoysticks                   :: proc() ---
 	UnlockJoysticks                 :: proc() ---
 	NumJoysticks                    :: proc() -> c.int ---

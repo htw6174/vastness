@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 TouchID  :: distinct i64
@@ -19,17 +20,17 @@ TouchDeviceType :: enum c.int {
 }
 
 Finger :: struct {
-	id: FingerID,
-	x:        f32,
-	y:        f32,
-	pressure: f32,
+    id: FingerID,
+    x:        f32,
+    y:        f32,
+    pressure: f32,
 }
 
 TOUCH_MOUSEID  :: ~u32(0)
 MOUSE_TOUCH_ID :: TouchID(-1)
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetNumTouchDevices :: proc() -> c.int ---
 	GetTouchDevice     :: proc(index: c.int) -> TouchID ---
 	GetTouchDeviceType :: proc(touchID: TouchID) -> TouchDeviceType ---

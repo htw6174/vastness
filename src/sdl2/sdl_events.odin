@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 RELEASED :: 0
@@ -171,9 +172,9 @@ KeyboardEvent :: struct {
 TEXTEDITINGEVENT_TEXT_SIZE :: 32
 TextEditingEvent :: struct {
 	type: EventType,                                /**< ::SDL_TEXTEDITING */
-	timestamp: u32,                           /**< In milliseconds, populated using SDL_GetTicks() */
-	windowID: u32,                            /**< The window with keyboard focus, if any */
-	text: [TEXTEDITINGEVENT_TEXT_SIZE]u8,  /**< The editing text */
+    	timestamp: u32,                           /**< In milliseconds, populated using SDL_GetTicks() */
+    	windowID: u32,                            /**< The window with keyboard focus, if any */
+    	text: [TEXTEDITINGEVENT_TEXT_SIZE]u8,  /**< The editing text */
 	start: i32,                               /**< The start cursor of selected editing text */
 	length: i32,                              /**< The length of selected editing text */
 }
@@ -184,7 +185,7 @@ TextInputEvent :: struct {
 	type: EventType,                              /**< ::SDL_TEXTINPUT */
 	timestamp: u32,                         /**< In milliseconds, populated using SDL_GetTicks() */
 	windowID: u32,                          /**< The window with keyboard focus, if any */
-	text: [TEXTINPUTEVENT_TEXT_SIZE]u8,  /**< The input text */
+    	text: [TEXTINPUTEVENT_TEXT_SIZE]u8,  /**< The input text */
 }
 
 MouseMotionEvent :: struct {
@@ -481,7 +482,7 @@ GetEventState :: #force_inline proc "c" (type: EventType) -> b8 { return EventSt
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	PumpEvents       :: proc() ---
 	PeepEvents       :: proc(events: [^]Event, numevents: c.int, action: eventaction, minType, maxType: EventType) -> c.int ---
 	HasEvent         :: proc(type: EventType) -> bool ---

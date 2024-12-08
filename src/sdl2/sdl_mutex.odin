@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 MUTEX_TIMEDOUT :: 1
@@ -22,7 +23,7 @@ mutexP :: LockMutex
 mutexV :: UnlockMutex
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	CreateMutex  :: proc() -> ^mutex ---
 	LockMutex    :: proc(m: ^mutex) -> c.int ---
 	TryLockMutex :: proc(m: ^mutex) -> c.int ---

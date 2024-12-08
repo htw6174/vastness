@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 HINT_ACCELEROMETER_AS_JOYSTICK                :: "SDL_ACCELEROMETER_AS_JOYSTICK"
@@ -139,7 +140,7 @@ HintPriority :: enum c.int {
 HintCallback :: proc "c" (userdata: rawptr, name, oldValue, newValue: cstring)
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	SetHintWithPriority :: proc(name, value: cstring, priority: HintPriority) -> bool ---
 	SetHint             :: proc(name, value: cstring) -> bool ---
 	GetHint             :: proc(name: cstring) -> cstring ---

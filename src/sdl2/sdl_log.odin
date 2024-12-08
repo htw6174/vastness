@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 MAX_LOG_MESSAGE :: 4096
@@ -59,7 +60,7 @@ LogOutputFunction :: proc "c" (userdata: rawptr, category: LogCategory, priority
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	LogSetAllPriority    :: proc(priority: LogPriority) ---
 	LogSetPriority       :: proc(category: c.int, priority: LogPriority) ---
 	LogGetPriority       :: proc(category: c.int) -> LogPriority ---

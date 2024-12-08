@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 ALPHA_OPAQUE      :: 255
@@ -22,7 +23,7 @@ PIXELTYPE_ARRAYU8  ::  7
 PIXELTYPE_ARRAYU16 ::  8
 PIXELTYPE_ARRAYU32 ::  9
 PIXELTYPE_ARRAYF16 :: 10
-PIXELTYPE_ARRAYF32 :: 11
+PIXELTYPE_ARRAYF3  :: 11
 
 BITMAPORDER_NONE :: 0
 BITMAPORDER_4321 :: 1
@@ -47,7 +48,7 @@ ARRAYORDER_RGBA :: 2
 ARRAYORDER_ARGB :: 3
 ARRAYORDER_BGR  :: 4
 ARRAYORDER_BGRA :: 5
-ARRAYORDER_ABGR :: 6
+ARRAYORDER_ABG  :: 6
 
 PACKEDLAYOUT_NONE    :: 0
 PACKEDLAYOUT_332     :: 1
@@ -220,7 +221,7 @@ PixelFormat :: struct {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetPixelFormatName     :: proc(format: u32) -> cstring ---
 	PixelFormatEnumToMasks :: proc(format: u32, bpp: ^c.int, Rmask, Gmask, Bmask, Amask: ^u32) -> bool ---
 	MasksToPixelFormatEnum :: proc(bpp: c.int, Rmask, Gmask, Bmask, Amask: u32) -> u32 ---

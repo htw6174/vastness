@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 SYSWM_TYPE :: enum c.int {
@@ -104,6 +105,6 @@ SysWMinfo :: struct {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetWindowWMInfo :: proc(window: ^Window, info: ^SysWMinfo) -> bool ---
 }

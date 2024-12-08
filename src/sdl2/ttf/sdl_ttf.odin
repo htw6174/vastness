@@ -1,12 +1,13 @@
 package sdl2_ttf
 
-import "core:c"
+
+import c "vendor_c"
 import SDL ".."
 
 when ODIN_OS == .Windows {
 	foreign import lib "SDL2_ttf.lib"
 } else {
-	foreign import lib "system:SDL2_ttf"
+	foreign import lib "SDL2_ttf"
 }
 
 bool :: SDL.bool
@@ -67,7 +68,7 @@ RenderUNICODE :: #force_inline proc "c" (font: ^Font, text: [^]u16, fg, bg: SDL.
 }
 
 @(default_calling_convention="c", link_prefix="TTF_")
-foreign lib {
+foreign {
 	Linked_Version :: proc() -> ^SDL.version ---
 
 	Init :: proc() -> c.int ---

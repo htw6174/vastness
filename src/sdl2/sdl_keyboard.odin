@@ -1,11 +1,12 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 Keysym :: struct {
@@ -17,7 +18,7 @@ Keysym :: struct {
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetKeyboardFocus        :: proc() -> ^Window ---
 	GetKeyboardState        :: proc(numkeys: ^c.int) -> [^]u8 ---
 	GetKeyFromScancode      :: proc(scancode: Scancode) -> Keycode ---
@@ -48,7 +49,7 @@ SetModState :: #force_inline proc "c" (modstate: Keymod) { SDL_SetModState(c.int
 
 @(default_calling_convention="c")
 @(private="file")
-foreign lib {
+foreign {
 	SDL_GetModState :: proc() -> c.int ---
 	SDL_SetModState :: proc(modstate: c.int) ---
 }

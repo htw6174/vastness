@@ -1,6 +1,7 @@
 package sdl2
 
-import "core:c"
+
+import c "vendor_c"
 
 Scancode :: enum c.int {
 	UNKNOWN = 0,

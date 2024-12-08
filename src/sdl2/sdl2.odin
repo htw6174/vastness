@@ -26,9 +26,9 @@ import "core:c"
 import "base:intrinsics"
 
 when ODIN_OS == .Windows {
-	foreign import lib "SDL2.lib"
+//	foreign import lib "sdl2"
 } else {
-	foreign import lib "system:SDL2"
+//	foreign import lib "sdl2"
 }
 
 version :: struct {
@@ -41,14 +41,8 @@ MAJOR_VERSION   :: 2
 MINOR_VERSION   :: 0
 PATCHLEVEL      :: 16
 
-VERSION :: proc "contextless" (ver: ^version) {
-	ver.major = MAJOR_VERSION
-	ver.minor = MINOR_VERSION
-	ver.patch = PATCHLEVEL
-}
-
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetVersion  :: proc(ver: ^version) ---
 	GetRevision :: proc() -> cstring ---
 
@@ -80,7 +74,7 @@ INIT_NOPARACHUTE    :: InitFlags{.NOPARACHUTE}     /**< compatibility; this flag
 INIT_EVERYTHING :: InitFlags{.TIMER, .AUDIO, .VIDEO, .EVENTS, .JOYSTICK, .HAPTIC, .GAMECONTROLLER, .SENSOR}
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	Init          :: proc(flags: InitFlags) -> c.int     ---
 	InitSubSystem :: proc(flags: InitFlags) -> c.int     ---
 	QuitSubSystem :: proc(flags: InitFlags)              ---
@@ -96,7 +90,7 @@ SpinLock :: distinct c.int
 atomic_t :: struct { value: c.int }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	AtomicTryLock                :: proc(lock: ^SpinLock) -> bool ---
 	AtomicLock                   :: proc(lock: ^SpinLock) ---
 	AtomicUnlock                 :: proc(lock: ^SpinLock) ---
@@ -124,7 +118,7 @@ HasExactlyOneBitSet32 :: #force_inline proc "c" (x: u32) -> bool {
 // Clipboard
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	SetClipboardText :: proc(text: cstring) -> c.int ---
 	GetClipboardText :: proc() -> cstring ---
 	HasClipboardText :: proc() -> bool ---
@@ -134,7 +128,7 @@ foreign lib {
 // Error
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	SetError    :: proc(fmt: cstring, #c_vararg args: ..any) -> c.int ---
 	GetError    :: proc() -> cstring ---
 	GetErrorMsg :: proc(errstr: [^]u8, maxlen: c.int) -> cstring ---
@@ -171,7 +165,7 @@ errorcode :: enum c.int {
 
 /* SDL_Error() unconditionally returns -1. */
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	Error :: proc(code: errorcode) -> c.int ---
 }
 
@@ -179,7 +173,7 @@ foreign lib {
 // Filesystem
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetBasePath :: proc() -> cstring ---
 	GetPrefPath :: proc(org, app: cstring) -> cstring ---
 }
@@ -188,7 +182,7 @@ foreign lib {
 // loadso
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	LoadObject   :: proc(sofile: cstring) -> rawptr ---
 	LoadFunction :: proc(handle: rawptr, name: cstring) -> rawptr ---
 	UnloadObject :: proc(handle: rawptr) ---
@@ -205,21 +199,21 @@ Locale :: struct {
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetPreferredLocales :: proc() -> [^]Locale ---
 }
 
 // misc
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	OpenURL :: proc(url: cstring) -> c.int ---
 }
 
 // platform
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetPlatform :: proc() -> cstring ---
 }
 
@@ -234,15 +228,15 @@ PowerState :: enum c.int {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	GetPowerInfo :: proc(secs: ^c.int, pct: ^c.int) -> PowerState ---
 }
 
 // quit
 
 QuitRequested :: #force_inline proc "c" () -> bool {
-	PumpEvents()
-	return bool(PeepEvents(nil, 0, .PEEKEVENT, .QUIT, .QUIT) > 0)
+        PumpEvents()
+        return bool(PeepEvents(nil, 0, .PEEKEVENT, .QUIT, .QUIT) > 0)
 }
 
 
@@ -263,7 +257,7 @@ STANDARD_GRAVITY :: 9.80665
 
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	LockSensors                    :: proc() ---
 	UnlockSensors                  :: proc() ---
 	NumSensors                     :: proc() -> c.int ---
@@ -316,7 +310,7 @@ WindowShapeMode :: struct {
 }
 
 @(default_calling_convention="c", link_prefix="SDL_")
-foreign lib {
+foreign {
 	CreateShapedWindow  :: proc(title: cstring, x, y, w, h: c.uint, flags: WindowFlags) -> ^Window ---
 	IsShapedWindow      :: proc(window: ^Window) -> bool ---
 	SetWindowShape      :: proc(window: ^Window, shape: ^Surface, shape_mode: ^WindowShapeMode) -> c.int ---
