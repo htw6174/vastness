@@ -1,4 +1,3 @@
-#+build !freestanding
 package wgpu
 
 import "base:intrinsics"
@@ -7,62 +6,6 @@ WGPU_SHARED :: #config(WGPU_SHARED, false)
 WGPU_DEBUG  :: #config(WGPU_DEBUG,  false)
 
 @(private) TYPE :: "debug" when WGPU_DEBUG else "release"
-
-when ODIN_OS == .Windows {
-	@(private) ARCH :: "x86_64"   when ODIN_ARCH == .amd64 else "x86_64" when ODIN_ARCH == .i386 else #panic("unsupported WGPU Native architecture")
-	@(private) EXT  :: ".dll.lib" when WGPU_SHARED else ".lib"
-	@(private) LIB  :: "lib/wgpu-windows-" + ARCH + "-" + TYPE + "/wgpu_native" + EXT
-
-	when !#exists(LIB) {
-		#panic("Could not find the compiled WGPU Native library at '" + #directory + LIB + "', these can be downloaded from https://github.com/gfx-rs/wgpu-native/releases/tag/v22.1.0.1, make sure to read the README at '" + #directory + "README.md'")
-	}
-
-	foreign import libwgpu {
-		LIB,
-		"system:d3dcompiler.lib",
-		"system:ws2_32.lib",
-		"system:userenv.lib",
-		"system:bcrypt.lib",
-		"system:ntdll.lib",
-		"system:opengl32.lib",
-		"system:advapi32.lib",
-		"system:user32.lib",
-		"system:gdi32.lib",
-		"system:ole32.lib",
-		"system:oleaut32.lib",
-	}
-} else when ODIN_OS == .Darwin {
-	@(private) ARCH :: "x86_64" when ODIN_ARCH == .amd64 else "aarch64" when ODIN_ARCH == .arm64 else #panic("unsupported WGPU Native architecture")
-	@(private) EXT  :: ".dylib" when WGPU_SHARED else ".a"
-	@(private) LIB  :: "lib/wgpu-macos-" + ARCH + "-" + TYPE + "/libwgpu_native" + EXT
-
-	when !#exists(LIB) {
-		#panic("Could not find the compiled WGPU Native library at '" + #directory + LIB + "', these can be downloaded from https://github.com/gfx-rs/wgpu-native/releases/tag/v22.1.0.1, make sure to read the README at '" + #directory + "README.md'")
-	}
-
-	foreign import libwgpu {
-		LIB,
-		"system:CoreFoundation.framework",
-		"system:QuartzCore.framework",
-		"system:Metal.framework",
-	}
-} else when ODIN_OS == .Linux {
-	@(private) ARCH :: "x86_64" when ODIN_ARCH == .amd64 else "aarch64" when ODIN_ARCH == .arm64 else #panic("unsupported WGPU Native architecture")
-	@(private) EXT  :: ".so"    when WGPU_SHARED else ".a"
-	@(private) LIB  :: "lib/wgpu-linux-" + ARCH + "-" + TYPE + "/libwgpu_native" + EXT
-
-	when !#exists(LIB) {
-		#panic("Could not find the compiled WGPU Native library at '" + #directory + LIB + "', these can be downloaded from https://github.com/gfx-rs/wgpu-native/releases/tag/v22.1.0.1, make sure to read the README at '" + #directory + "README.md'")
-	}
-
-	foreign import libwgpu {
-		LIB,
-		"system:dl",
-		"system:m",
-	}
-} else when ODIN_OS == .JS {
-	foreign import libwgpu "wgpu"
-}
 
 ARRAY_LAYER_COUNT_UNDEFINED :: max(u32)
 COPY_STRIDE_UNDEFINED :: max(u32)
@@ -1299,7 +1242,7 @@ RenderPipelineDescriptor :: struct {
 }
 
 @(link_prefix="wgpu", default_calling_convention="c")
-foreign libwgpu {
+foreign _ {
 	@(link_name="wgpuCreateInstance")
 	RawCreateInstance :: proc(/* NULLABLE */ descriptor: /* const */ ^InstanceDescriptor = nil) -> Instance ---
 	GetProcAddress :: proc(device: Device, procName: cstring) -> Proc ---
@@ -1551,7 +1494,7 @@ foreign libwgpu {
 // Wrappers of Instance
 
 CreateInstance :: proc "c" (/* NULLABLE */ descriptor: /* const */ ^InstanceDescriptor = nil) -> Instance {
-	when ODIN_OS != .JS {
+    when ODIN_OS != .JS && ODIN_OS != .Freestanding {
 		wgpu_native_version_check()
 	}
 
@@ -1709,7 +1652,7 @@ SurfaceGetCurrentTexture :: proc "c" (surface: Surface) -> (surface_texture: Sur
 BINDINGS_VERSION        :: [4]u8{22, 1, 0, 1}
 BINDINGS_VERSION_STRING :: "22.1.0.1"
 
-when ODIN_OS != .JS {
+when ODIN_OS != .JS && ODIN_OS != .Freestanding {
 	@(private="file")
 	wgpu_native_version_check :: proc "c" () {
 		v := (transmute([4]u8)GetVersion()).wzyx
@@ -1724,8 +1667,8 @@ when ODIN_OS != .JS {
 		}
 	}
 
-	@(link_prefix="wgpu")
-	foreign libwgpu {
+	@(link_prefix="wgpu", default_calling_convention="c")
+	foreign _ {
 		@(link_name="wgpuGenerateReport")
 		RawGenerateReport :: proc(instance: Instance, report: ^GlobalReport) ---
 		@(link_name="wgpuInstanceEnumerateAdapters")
