@@ -40,4 +40,10 @@ build_lib_x64_debug sokol_debugtext     debugtext/sokol_debugtext_linux_x64_gl_d
 build_lib_x64_debug sokol_shape         shape/sokol_shape_linux_x64_gl_debug SOKOL_GLCORE
 build_lib_x64_debug sokol_gl            gl/sokol_gl_linux_x64_gl_debug SOKOL_GLCORE
 
+# x64 + WGPU + Release
+build_lib_x64_release sokol_gfx         gfx/sokol_gfx_linux_x64_wgpu_release SOKOL_WGPU
+
+# x64 + WGPU + Debug
+build_lib_x64_debug sokol_gfx         gfx/sokol_gfx_linux_x64_wgpu_debug SOKOL_WGPU
+
 rm *.o

@@ -1,3 +1,4 @@
+#+build !freestanding
 // machine generated, do not edit
 
 package sokol_gfx
@@ -8,6 +9,7 @@ SOKOL_DEBUG :: #config(SOKOL_DEBUG, ODIN_DEBUG)
 
 DEBUG :: #config(SOKOL_GFX_DEBUG, SOKOL_DEBUG)
 USE_GL :: #config(SOKOL_USE_GL, false)
+USE_WGPU :: #config(SOKOL_WGPU, false)
 USE_DLL :: #config(SOKOL_DLL, false)
 
 when ODIN_OS == .Windows {
@@ -58,8 +60,13 @@ when ODIN_OS == .Windows {
         }
     }
 } else when ODIN_OS == .Linux {
-    when DEBUG { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_gl_debug.a", "system:GL", "system:dl", "system:pthread" } }
-    else       { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_gl_release.a", "system:GL", "system:dl", "system:pthread" } }
+    when USE_WGPU {
+        when DEBUG { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_wgpu_debug.a", "system:dl", "system:pthread" } }
+        else       { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_wgpu_release.a", "system:dl", "system:pthread" } }
+    } else {
+        when DEBUG { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_gl_debug.a", "system:GL", "system:dl", "system:pthread" } }
+        else       { foreign import sokol_gfx_clib { "sokol_gfx_linux_x64_gl_release.a", "system:GL", "system:dl", "system:pthread" } }
+    }
 } else {
     #panic("This OS is currently not supported")
 }
