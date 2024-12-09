@@ -5,11 +5,11 @@ import "core:c"
 import "core:fmt"
 import "core:mem"
 
-//import sdl2 "sdl2"
+import sdl2 "sdl2"
 import sg "sokol/gfx"
-import "vendor:sdl2"
+//import "vendor:sdl2"
 import "vendor:wgpu"
-import "vendor:wgpu/sdl2glue"
+//import "vendor:wgpu/sdl2glue"
 
 pass_action: sg.Pass_Action
 
@@ -198,7 +198,7 @@ step :: proc "contextless" () {
 	switch render_texture.status {
 	case .Success:
 	case .Timeout, .Outdated, .Lost:
-		fmt.println("Surface changed, reconfiguring...")
+		slog_basic("Surface changed, reconfiguring...")
 		if render_texture.texture != nil {
 			wgpu.TextureRelease(render_texture.texture)
 		}
