@@ -4634,9 +4634,6 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
     #import <QuartzCore/CoreAnimation.h> // needed for CAMetalDrawable
 #elif defined(SOKOL_WGPU)
     #include <webgpu/webgpu.h>
-    #if defined(__EMSCRIPTEN__)
-        #include <emscripten/emscripten.h>
-    #endif
 #elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
     #define _SOKOL_ANY_GL (1)
 
