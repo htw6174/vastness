@@ -5,11 +5,16 @@ import "core:c"
 import "core:fmt"
 import "core:mem"
 
-import sdl2 "sdl2"
 import sg "sokol/gfx"
-//import "vendor:sdl2"
+
+/* Imports for native build */
+import "vendor:sdl2"
 import "vendor:wgpu"
-//import "vendor:wgpu/sdl2glue"
+import "vendor:wgpu/sdl2glue"
+
+/* Imports for wasm build */
+// import sdl2 "sdl2"
+// import wgpu "wgpu"
 
 pass_action: sg.Pass_Action
 
