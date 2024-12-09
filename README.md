@@ -2,16 +2,18 @@ Template project for making games with Odin as either a native or wasm applicati
 
 ## Requirements
 Only tested on linux, but the makefile's odin and emcc commands should also work on Windows or OSX
+
 Both native and wasm builds require [Odin](https://odin-lang.org/)
+
 Wasm builds require the Emscripten SDK
 
 ## Usage
-(One-time) Build sokol_gfx to library files by running `src/sokol/build_clibs_*` for the platforms you're building for
+(One-time) Build sokol_gfx to library files by running the `src/sokol/build_clibs_*` script for your os, and `src/sokol/build_clibs_wasm.sh` (TODO: add Windows build script for wasm)
 
 In `src/main.odin`, uncomment the import block for the build type you want (native or wasm)
-- Unfortunately, Odin's `when` compile-time conditional doesn't allow `include` statements, so you must do this or only access platform-dependent modules through a [conditionally-compiled wrapper file](https://odin-lang.org/docs/overview/#file-suffixes)
+- Unfortunately, Odin's `when` compile-time conditional doesn't allow `include` statements, so you must either do this when changing build targets, OR only access platform-dependent modules through a [conditionally-compiled wrapper file](https://odin-lang.org/docs/overview/#file-suffixes)
 
-Run `make native` or `make wasm` (default: native)
+Do `make native` or `make wasm` (default: native)
 
 Start the app by running `build/game` for native builds, or hosting the contents of `web` for wasm builds e.g. `emrun web`
 
