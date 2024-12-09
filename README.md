@@ -1,13 +1,19 @@
 Demo project for making games with Odin as either a native or wasm application. Trades the easy JS library access of Odin's `JS` target for the ability to use any c libraries that work with Emscripten, such as SDL or [Sokol](https://github.com/floooh/sokol).
 
-Thanks to [NHDaly](https://github.com/NHDaly/sdl-wasm-odin) for modifying Odin's SDL2 package to work with Emscripten.
+Both native and wasm builds use WebGPU for the rendering backend. The intent is to quickly build and test natively, then deploy to web with minimal changes.
+
+Thanks to [Caedo](https://github.com/Caedo/raylib_wasm_odin) for the Emscripten wrapper approach, and [NHDaly](https://github.com/NHDaly/sdl-wasm-odin) for modifying Odin's SDL2 package to work with Emscripten.
 
 ## Requirements
 Only tested on linux, but the makefile's odin and emcc commands should also work on Windows or OSX
 
 Both native and wasm builds require [Odin](https://odin-lang.org/)
 
+Native builds require [wgpu-native](https://github.com/gfx-rs/wgpu-native)
+
 Wasm builds require the Emscripten SDK
+
+Running wasm builds requires a browser with WebGPU support: https://github.com/gpuweb/gpuweb/wiki/Implementation-Status
 
 ## Usage
 (One-time) Build sokol_gfx to library files by running the `src/sokol/build_clibs_*` script for your os, and `src/sokol/build_clibs_wasm.sh` (TODO: add Windows build script for wasm)
