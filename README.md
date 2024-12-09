@@ -1,4 +1,6 @@
-Template project for making games with Odin as either a native or wasm application. Trades the easy JS library access of Odin's `JS` target for the ability to use any c libraries that work with Emscripten, such as SDL or [Sokol](https://github.com/floooh/sokol).
+Demo project for making games with Odin as either a native or wasm application. Trades the easy JS library access of Odin's `JS` target for the ability to use any c libraries that work with Emscripten, such as SDL or [Sokol](https://github.com/floooh/sokol).
+
+Thanks to [NHDaly](https://github.com/NHDaly/sdl-wasm-odin) for modifying Odin's SDL2 package to work with Emscripten.
 
 ## Requirements
 Only tested on linux, but the makefile's odin and emcc commands should also work on Windows or OSX
