@@ -1,7 +1,7 @@
 native:
 	echo "odin build"
 	mkdir -p build
-	odin run src -define:SOKOL_WGPU=true -out:build/game -debug -show-system-calls
+	odin run src -define:SOKOL_WGPU=true -out:build/game -debug
 
 wasm:
 	echo "odin build object"
