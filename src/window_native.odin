@@ -10,8 +10,6 @@ import "vendor:sdl2"
 import "vendor:wgpu"
 import "vendor:wgpu/sdl2glue"
 
-Draw_Callback :: proc(_: sg.Swapchain)
-
 WindowState :: struct {
 	initialized: bool,
 	window:      ^sdl2.Window,
@@ -130,7 +128,25 @@ window_init :: proc() {
 	}
 }
 
-window_draw :: proc(draw_cb: Draw_Callback) {
+window_loop :: proc() {
+	counter_freq := sdl2.GetPerformanceFrequency()
+	time_now := sdl2.GetPerformanceCounter()
+	time_last := time_now
+	acc: f64 = 0
+	for !sdl2.QuitRequested() {
+		time_now := sdl2.GetPerformanceCounter()
+		dt := f64(time_now - time_last) / f64(counter_freq)
+		acc += dt
+		if acc > 1 {
+			//fmt.printfln("last frame: %.3fms", dt * 1000)
+			acc -= 1
+		}
+		step()
+		time_last = time_now
+	}
+}
+
+window_draw :: proc() {
 	if !state.initialized {
 		return
 	}
@@ -156,39 +172,16 @@ window_draw :: proc(draw_cb: Draw_Callback) {
 	// TODO: create and use depth buffer texture
 	//state.swapchain.wgpu.depth_stencil_view =
 
-	draw_cb(state.swapchain)
+	view_draw(state.swapchain)
 
-	// TODO can remove when from this file
-	when ODIN_OS != .Freestanding do wgpu.SurfacePresent(state.surface)
-}
-
-run :: proc() {
-	start()
-
-	counter_freq := sdl2.GetPerformanceFrequency()
-	time_now := sdl2.GetPerformanceCounter()
-	time_last := time_now
-	acc: f64 = 0
-	for !sdl2.QuitRequested() {
-		time_now := sdl2.GetPerformanceCounter()
-		dt := f64(time_now - time_last) / f64(counter_freq)
-		acc += dt
-		if acc > 1 {
-			//fmt.printfln("last frame: %.3fms", dt * 1000)
-			acc -= 1
-		}
-		step()
-		time_last = time_now
-	}
-
-	stop()
+	wgpu.SurfacePresent(state.surface)
 }
 
 window_shutdown :: proc() {
 	sdl2.Quit()
 }
 
-@(private)
+@(private = "file")
 configure_surface :: proc() {
 	state.config.width, state.config.height = window_get_render_bounds()
 	state.swapchain.width = i32(state.config.width)

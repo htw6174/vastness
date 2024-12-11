@@ -17,7 +17,9 @@ world: ^sim.World
 
 when ODIN_OS != .Freestanding {
 	main :: proc() {
-		run()
+		start()
+		window_loop()
+		stop()
 	}
 }
 
@@ -49,7 +51,7 @@ step :: proc "contextless" () {
 	context = ctx
 	free_all(context.temp_allocator)
 
-	window_draw(view_draw)
+	window_draw()
 	sim.step(world)
 }
 
