@@ -12,6 +12,8 @@ struct VertexOutput {
     @location(1) @interpolate(flat) color: u32,
 };
 
+@group(0) @binding(0) var<uniform> transform: mat4x4<f32>;
+
 @vertex
 fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     var output: VertexOutput;
@@ -28,5 +30,3 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     output.color    = inst.color;
     return output;
 }
-
-@group(0) @binding(2) var<uniform> transform: mat4x4<f32>;

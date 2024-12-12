@@ -30,8 +30,8 @@ window_init :: proc() {
 		"Odin Game",
 		sdl2.WINDOWPOS_CENTERED,
 		sdl2.WINDOWPOS_CENTERED,
-		640,
-		480,
+		1280,
+		720,
 		sdl2.WINDOW_SHOWN | sdl2.WINDOW_RESIZABLE,
 	)
 	assert(state.window != nil, sdl2.GetErrorString())
