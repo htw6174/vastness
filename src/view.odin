@@ -76,16 +76,22 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	fs.BeginState(fc)
 	fs.SetFont(fc, state.font_default)
 	// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's base pixel size
-	fs.SetSize(fc, 16)
+	fs.SetSize(fc, 40)
 	// Defaults: Left, Baseline
 	fs.SetAlignHorizontal(fc, .LEFT)
 	fs.SetAlignVertical(fc, .BASELINE)
 	// NOTE: in Odin's implementation of fontstash, this only sets the current state's color, which is unused by the library
 	// Retrieve color from current state for writing instance data if you want to manage color through the state stack
 	//fs.SetColor(fc, Color{0, 0, 255, 255})
+
+	_, _, line_height := fs.VerticalMetrics(fc)
 	// write glyph info into buffer
-	// FIXME: why don't descenders appear on p and q?
-	message := "Hellope! quilt time."
+	// FIXME: why don't descenders appear on p and q in the handwritten 17 font?
+	message := `Hellope!
+
+	The quick brown fox
+	jumped over
+	the lazy dog.`
 	quad: fs.Quad
 	iter := fs.TextIterInit(fc, 0, 0, message)
 	for i := 0; fs.TextIterNext(fc, &iter, &quad); i += 1 {
@@ -96,6 +102,11 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 			uv_max  = {quad.s1, quad.t1},
 			// FIXME: why does the fragment shader interpret this as transparent after unpacking?
 			color   = Color{255, 255, 255, 255},
+		}
+        // TODO: detect overflow of text area
+		if iter.codepoint == '\n' {
+		    iter.nextx = 0
+						iter.nexty += line_height
 		}
 	}
 	fs.EndState(fc)
@@ -124,9 +135,9 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	sg.apply_bindings(state.text_bindings)
 
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
-	state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
-	scale: f32 = 0.01
-	state.text_transform *= linalg.matrix4_scale_f32({scale, scale, scale})
+	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
+	scale: f32 = 1
+	state.text_transform = linalg.matrix4_translate_f32({0, -0.2, 0}) * linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
 	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
 	sg.apply_uniforms(0, {&state.text_transform, size_of(Transform)})
 	sg.draw(0, 6, len(message))
@@ -232,7 +243,7 @@ state_init_font :: proc() {
 	state.font_default = fs.AddFontMem(
 		&state.font_context,
 		"Default",
-		#load("../assets/font/Not Jam Mono Clean 8.ttf"),
+		#load("../assets/font/Darinia.ttf"),
 		false,
 	)
 

@@ -9,7 +9,7 @@ fn main(@location(0) uv: vec2<f32>, @location(1) @interpolate(flat) color: u32) 
 
     // DEBUG
     let background = vec4<f32>(1, 0, 1, 1);
-    return mix(background, albedo, texColor.r);
-    //return albedo; // * tint;
+    //return mix(background, albedo, texColor.r);
+    return albedo; // * tint;
     //return vec4<f32>(uv.x, uv.y, 0, 1);
 }
