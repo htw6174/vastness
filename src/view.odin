@@ -1,6 +1,7 @@
 package main
 
 import "core:c"
+import "core:math"
 import "core:math/linalg"
 import sg "sokol/gfx"
 import fs "vendor:fontstash"
@@ -39,7 +40,7 @@ Font_Instance :: struct {
 	color:   Color,
 }
 
-Color :: [4]u8
+Color :: [4]f32
 Transform :: matrix[4, 4]f32
 
 DEFAULT_FONT_ATLAS_SIZE :: 512
@@ -100,8 +101,10 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 			pos_max = {quad.x1, quad.y1},
 			uv_min  = {quad.s0, quad.t0},
 			uv_max  = {quad.s1, quad.t1},
-			// FIXME: why does the fragment shader interpret this as transparent after unpacking?
-			color   = Color{255, 255, 255, 255},
+			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
+			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
+			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
+			color   = Color{0, 1, 1, 1},
 		}
         // TODO: detect overflow of text area
 		if iter.codepoint == '\n' {
@@ -140,7 +143,7 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	state.text_transform = linalg.matrix4_translate_f32({0, -0.2, 0}) * linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
 	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
 	sg.apply_uniforms(0, {&state.text_transform, size_of(Transform)})
-	sg.draw(0, 6, len(message))
+	sg.draw(0, 6, math.min(len(message), int(state.frame / 4)))
 
 	// draw debug quad over full screen
 	sg.apply_pipeline(state.debug_pipeline)
@@ -334,7 +337,7 @@ state_init_font :: proc() {
 					1 = {format = .FLOAT2},
 					2 = {format = .FLOAT2},
 					3 = {format = .FLOAT2},
-					4 = {format = .UBYTE4},
+					4 = {format = .FLOAT4},
 				},
 			},
 			colors = {

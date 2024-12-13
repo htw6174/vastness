@@ -6,7 +6,7 @@ native:
 wasm:
 	echo "odin build object"
 	mkdir -p build
-	odin build src -target=freestanding_wasm32 -out:build/odin -build-mode:obj -debug -show-system-calls
+	odin build src -target=freestanding_wasm32 -out:build/odin -build-mode:obj -debug -show-system-calls -use-separate-modules
 
 	echo "emcc build"
 	mkdir -p web

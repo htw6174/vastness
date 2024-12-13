@@ -120,6 +120,8 @@ window_init :: proc() {
 			wgpu = {render_view = nil, resolve_view = nil, depth_stencil_view = nil},
 		}
 
+		view_init()
+
 		state.initialized = true
 	}
 }
@@ -154,6 +156,7 @@ window_draw :: proc() {
 }
 
 window_shutdown :: proc() {
+    view_shutdown()
 	sdl2.Quit()
 }
 

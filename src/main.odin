@@ -43,7 +43,6 @@ start :: proc "c" () {
 
 	world = sim.init()
 	window_init()
-	view_init()
 }
 
 @(export, link_name = "step")
@@ -59,7 +58,6 @@ step :: proc "contextless" () {
 stop :: proc "contextless" () {
 	context = ctx
 
-	view_shutdown()
 	window_shutdown()
 	sim.fini(world)
 }
