@@ -17,9 +17,11 @@ Running wasm builds requires a browser with WebGPU support: https://github.com/g
 
 ## Usage
 (One-time) Build sokol_gfx to library files by running the `src/sokol/build_clibs_*` script for your os, and `src/sokol/build_clibs_wasm.sh` (TODO: add Windows build script for wasm)
+- Linux: `cd src/sokol` then `./build_clibs_linux.sh` and/or `./build_clibs_wasm.sh`
 
-In `src/main.odin`, uncomment the import block for the build type you want (native or wasm)
-- Unfortunately, Odin's `when` compile-time conditional doesn't allow `include` statements, so you must either do this when changing build targets, OR only access platform-dependent modules through a [conditionally-compiled wrapper file](https://odin-lang.org/docs/overview/#file-suffixes)
+(One-time) (Only required for wasm builds) Copy the contents of `patch` into your `odin root` directory
+- Linux: `cp -r patch/* $(odin root)`
+- This changes some vendor libs which normally require Odin's libc for wasm to ignore the requirement, using emscripten's libc instead
 
 Do `make native` or `make wasm` (default: native)
 

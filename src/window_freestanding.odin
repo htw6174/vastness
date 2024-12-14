@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import "core:c"
 import "core:fmt"
 
@@ -156,7 +157,7 @@ window_draw :: proc() {
 }
 
 window_shutdown :: proc() {
-    view_shutdown()
+	view_shutdown()
 	sdl2.Quit()
 }
 
@@ -188,4 +189,17 @@ window_get_surface :: proc(instance: wgpu.Instance) -> wgpu.Surface {
 
 foreign _ {
 	slog_func :: proc "c" (tag: cstring, log_level: u32, log_item_id: u32, message: cstring, line: u32, filename: cstring, usr_data: rawptr) ---
+}
+
+// Required for importing stb_truetype, because the freestanding lib is built with Odin's vendor libc
+@(require, linkage = "strong", link_name = "__odin_libc_assert_fail")
+__odin_libc_assert_fail :: proc "c" (func: cstring, file: cstring, line: i32, expr: cstring) -> ! {
+	context = ctx
+	loc := runtime.Source_Code_Location {
+		file_path = string(file),
+		line      = line,
+		column    = 0,
+		procedure = string(func),
+	}
+	context.assertion_failure_proc("runtime assertion", string(expr), loc)
 }
