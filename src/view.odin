@@ -47,7 +47,7 @@ Font_Instance :: struct {
 Text_Box :: struct {
     text: string,
     font_state: fs.State,
-    rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's width
+    rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
     scale: f32, // Use whole numbers to preserve pixel font rendering
 }
 
@@ -89,7 +89,7 @@ view_init :: proc() {
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {5, 5, 600, 360},
+		rect = {5, 5, 100, 50},
 		scale = 2,
 	}
 }
@@ -342,10 +342,19 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
 			color   = Color{0, 0, 0, 1},
 		}
-       // TODO: detect overflow of text area
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
 			iter.nexty += line_height
+		}
+        // DESIRED BEHAVIOR: never draw a glyph with any part outside rect bounds. On horizontal overflow, move to next line. On vertical overflow, move to top-left (initial) position
+	    // For now, just check nextx
+		if iter.nextx > text_box.rect.z {
+		    iter.nextx = 0
+			iter.nexty += line_height
+		}
+		if iter.nexty > text_box.rect.w {
+		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate behavior
+		    iter = fs.TextIterInit(fc, 0, 0, text_box.text[i+1:])
 		}
 	}
 
