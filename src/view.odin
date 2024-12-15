@@ -1,6 +1,7 @@
 package main
 
 import "core:c"
+import "core:strings"
 import "core:math"
 import "core:math/linalg"
 import sg "sokol/gfx"
@@ -8,7 +9,7 @@ import fs "vendor:fontstash"
 
 pass_action: sg.Pass_Action
 
-ViewState :: struct {
+View_State :: struct {
 	frame:          u64,
 	canvas_pv:      Transform,
 
@@ -26,6 +27,9 @@ ViewState :: struct {
 	text_instances: []Font_Instance,
 	text_buffer:    sg.Buffer,
 	text_transform: Transform,
+
+	// text buffers
+	user_input: string
 }
 
 Shapes :: struct {
@@ -40,15 +44,24 @@ Font_Instance :: struct {
 	color:   Color,
 }
 
+Text_Box :: struct {
+    text: string,
+    font_state: fs.State,
+    max_rect: Rect,
+}
+
 Color :: [4]f32
+Rect :: [4]f32
 Transform :: matrix[4, 4]f32
 
 DEFAULT_FONT_ATLAS_SIZE :: 512
 MAX_FONT_INSTANCES :: 1024
 
 @(private = "file")
-state: ViewState
+state: View_State
 shapes: Shapes
+
+/* Callbacks used by Window */
 
 view_init :: proc() {
 	state.frame = 0
@@ -56,6 +69,8 @@ view_init :: proc() {
 		load_action = .CLEAR,
 		clear_value = {.5, .5, .5, 1},
 	}
+
+	state.user_input = "Hellope!\n>"
 
 	state_init_shapes()
 
@@ -94,7 +109,7 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	jumped over
 	the lazy dog.`
 	quad: fs.Quad
-	iter := fs.TextIterInit(fc, 0, 0, message)
+	iter := fs.TextIterInit(fc, 0, 0, state.user_input)
 	for i := 0; fs.TextIterNext(fc, &iter, &quad); i += 1 {
 		state.text_instances[i] = {
 			pos_min = {quad.x0, quad.y0},
@@ -104,29 +119,17 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
 			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
-			color   = Color{0, 1, 1, 1},
+			color   = Color{0, 0, 0, 1},
 		}
         // TODO: detect overflow of text area
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
-						iter.nexty += line_height
+			iter.nexty += line_height
 		}
 	}
+
+	// NOTE: EndState resets the dirty rect after calling the update callback (if it was set). If not using the callback, must check for updates before ending state.
 	fs.EndState(fc)
-
-	if state.frame == 0 do font_update_atlas()
-
-	// FIXME: neither of these conditions pass after writing text
-	// check if needs resize
-	if (fc.width != DEFAULT_FONT_ATLAS_SIZE || fc.height != DEFAULT_FONT_ATLAS_SIZE) {
-		slog_basic("Atlas needs resize, but not implemented yet!")
-	}
-	// Check if dirty
-	dirty_rect := [4]f32{}
-	if fs.ValidateTexture(fc, &dirty_rect) {
-		slog_basic("Atlas is dirty, updating on gpu")
-		font_update_atlas()
-	}
 
 	// TODO: helper for turning a slice/small array into sg.Range
 	sg.update_buffer(
@@ -158,6 +161,8 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 view_shutdown :: proc() {
 	sg.shutdown()
 }
+
+/* Graphics Setup */
 
 state_init_shapes :: proc() {
 	shapes.quad_index_buffer = sg.alloc_buffer()
@@ -241,7 +246,10 @@ state_init_debug :: proc() {
 }
 
 state_init_font :: proc() {
-	state.font_context = {}
+	state.font_context = {
+        callbackResize = font_resize_atlas,
+        callbackUpdate = font_update_atlas,
+	}
 	fs.Init(&state.font_context, DEFAULT_FONT_ATLAS_SIZE, DEFAULT_FONT_ATLAS_SIZE, .TOPLEFT)
 	state.font_default = fs.AddFontMem(
 		&state.font_context,
@@ -357,8 +365,12 @@ state_init_font :: proc() {
 	)
 }
 
-// glyphs are only added to the atlas after fs.TextIterNext sees them for the first time. Between filling the text instance buffers and drawing, should check if atlas is dirty and update if so.
-font_update_atlas :: proc() {
+font_resize_atlas :: proc(data: rawptr, w, h: int) {
+    // TODO
+}
+
+// Must ignore the raw texture data passed as last param because the length has been discarded by a raw_data call, just use the context instead
+font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 	sg.update_image(
 		state.font_atlas,
 		{
@@ -372,4 +384,20 @@ font_update_atlas :: proc() {
 			},
 		},
 	)
+}
+
+
+/* Event Handling */
+
+handle_text_input :: proc(raw_text: []u8) {
+    text := string(cstring(raw_data(raw_text)))
+    state.user_input = strings.concatenate({state.user_input, text})
+}
+
+handle_command_key :: proc() {
+    // TODO:
+    // backspace
+    // enter
+    // left/right
+    // delete
 }

@@ -153,6 +153,20 @@ window_draw :: proc() {
 		return
 	}
 
+	// event handling
+	// TODO: SDL_StartTextInput is enabled by default on desktop, but disabled by default on mobile. Should add a hotkey and touchable area to begin console input and call SDL_StartTextInput, then end text input after de-selecting the console (or when on-screen keyboard is collapsed?)
+	assert(bool(sdl2.IsTextInputActive()))
+	sdl2.PumpEvents()
+	event: sdl2.Event
+	if sdl2.PollEvent(&event) {
+		#partial switch event.type {
+		case .TEXTINPUT:
+			s := string(cstring(raw_data(event.text.text[:])))
+			fmt.print(s)
+			handle_text_input(event.text.text[:])
+		}
+	}
+
 	render_texture := wgpu.SurfaceGetCurrentTexture(state.surface)
 	// check texture status, re-configure surface if needed
 	switch render_texture.status {
@@ -180,7 +194,7 @@ window_draw :: proc() {
 }
 
 window_shutdown :: proc() {
-    view_shutdown()
+	view_shutdown()
 	sdl2.Quit()
 }
 
