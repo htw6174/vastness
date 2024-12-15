@@ -160,10 +160,19 @@ window_draw :: proc() {
 	event: sdl2.Event
 	if sdl2.PollEvent(&event) {
 		#partial switch event.type {
+		case .KEYDOWN:
+			#partial switch event.key.keysym.sym {
+			case .ESCAPE:
+			// TODO: request exit (only on desktop!)
+			case .RETURN:
+				input_newline()
+			case .BACKSPACE:
+				input_backspace()
+			}
+		// NOTE: only captures visible glyphs and non-newline whitespace
 		case .TEXTINPUT:
-			s := string(cstring(raw_data(event.text.text[:])))
-			fmt.print(s)
-			handle_text_input(event.text.text[:])
+			//s := string(cstring(raw_data(event.text.text[:])))
+			input_text(event.text.text[:])
 		}
 	}
 

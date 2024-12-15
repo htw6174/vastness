@@ -29,7 +29,7 @@ View_State :: struct {
 	text_transform: Transform,
 
 	// text buffers
-	user_input: string
+	user_console: Text_Box,
 }
 
 Shapes :: struct {
@@ -47,11 +47,12 @@ Font_Instance :: struct {
 Text_Box :: struct {
     text: string,
     font_state: fs.State,
-    max_rect: Rect,
+    rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's width
+    scale: f32, // Use whole numbers to preserve pixel font rendering
 }
 
 Color :: [4]f32
-Rect :: [4]f32
+Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
 Transform :: matrix[4, 4]f32
 
 DEFAULT_FONT_ATLAS_SIZE :: 512
@@ -70,13 +71,27 @@ view_init :: proc() {
 		clear_value = {.5, .5, .5, 1},
 	}
 
-	state.user_input = "Hellope!\n>"
-
 	state_init_shapes()
 
 	// fontstash: init, add defult font
 	state_init_font()
 	state_init_debug()
+
+	state.user_console = {
+	    text = "Hellope!\n>",
+		font_state = {
+		    font = state.font_default,
+			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
+			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
+			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
+			size = 20,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		rect = {5, 5, 600, 360},
+		scale = 2,
+	}
 }
 
 view_draw :: proc(swapchain: sg.Swapchain) {
@@ -86,67 +101,10 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	state.canvas_pv = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 
 	fc := &state.font_context
-	fs.ClearState(fc)
-
-	//fs.SetFont(fc, 0)
 	fs.BeginState(fc)
-	fs.SetFont(fc, state.font_default)
-	// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's base pixel size
-	fs.SetSize(fc, 40)
-	// Defaults: Left, Baseline
-	fs.SetAlignHorizontal(fc, .LEFT)
-	fs.SetAlignVertical(fc, .BASELINE)
-	// NOTE: in Odin's implementation of fontstash, this only sets the current state's color, which is unused by the library
-	// Retrieve color from current state for writing instance data if you want to manage color through the state stack
-	//fs.SetColor(fc, Color{0, 0, 255, 255})
+	defer fs.EndState(fc)
 
-	_, _, line_height := fs.VerticalMetrics(fc)
-	// write glyph info into buffer
-	// FIXME: why don't descenders appear on p and q in the handwritten 17 font?
-	message := `Hellope!
-
-	The quick brown fox
-	jumped over
-	the lazy dog.`
-	quad: fs.Quad
-	iter := fs.TextIterInit(fc, 0, 0, state.user_input)
-	for i := 0; fs.TextIterNext(fc, &iter, &quad); i += 1 {
-		state.text_instances[i] = {
-			pos_min = {quad.x0, quad.y0},
-			pos_max = {quad.x1, quad.y1},
-			uv_min  = {quad.s0, quad.t0},
-			uv_max  = {quad.s1, quad.t1},
-			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
-			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
-			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
-			color   = Color{0, 0, 0, 1},
-		}
-        // TODO: detect overflow of text area
-		if iter.codepoint == '\n' {
-		    iter.nextx = 0
-			iter.nexty += line_height
-		}
-	}
-
-	// NOTE: EndState resets the dirty rect after calling the update callback (if it was set). If not using the callback, must check for updates before ending state.
-	fs.EndState(fc)
-
-	// TODO: helper for turning a slice/small array into sg.Range
-	sg.update_buffer(
-		state.text_buffer,
-		{ptr = raw_data(state.text_instances), size = size_of(Font_Instance) * MAX_FONT_INSTANCES},
-	)
-
-	sg.apply_pipeline(state.text_pipeline)
-	sg.apply_bindings(state.text_bindings)
-
-	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
-	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
-	scale: f32 = 1
-	state.text_transform = linalg.matrix4_translate_f32({0, -0.2, 0}) * linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
-	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
-	sg.apply_uniforms(0, {&state.text_transform, size_of(Transform)})
-	sg.draw(0, 6, math.min(len(message), int(state.frame / 4)))
+	draw_text_box(fc, &state.user_console)
 
 	// draw debug quad over full screen
 	sg.apply_pipeline(state.debug_pipeline)
@@ -365,6 +323,52 @@ state_init_font :: proc() {
 	)
 }
 
+draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
+    fs.PushState(fc)
+    fs.__getState(fc)^ = text_box.font_state
+
+	_, _, line_height := fs.VerticalMetrics(fc)
+	// write glyph info into buffer
+	quad: fs.Quad
+	iter := fs.TextIterInit(fc, 0, 0, text_box.text)
+	for i := 0; i < len(state.text_instances) && fs.TextIterNext(fc, &iter, &quad); i += 1 {
+		state.text_instances[i] = {
+			pos_min = {quad.x0, quad.y0},
+			pos_max = {quad.x1, quad.y1},
+			uv_min  = {quad.s0, quad.t0},
+			uv_max  = {quad.s1, quad.t1},
+			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
+			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
+			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
+			color   = Color{0, 0, 0, 1},
+		}
+       // TODO: detect overflow of text area
+		if iter.codepoint == '\n' {
+		    iter.nextx = 0
+			iter.nexty += line_height
+		}
+	}
+
+	fs.PopState(fc)
+
+	// TODO: helper for turning a slice/small array into sg.Range
+	sg.update_buffer(
+		state.text_buffer,
+		{ptr = raw_data(state.text_instances), size = size_of(Font_Instance) * MAX_FONT_INSTANCES},
+	)
+
+	sg.apply_pipeline(state.text_pipeline)
+	sg.apply_bindings(state.text_bindings)
+
+	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
+	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
+	scale: f32 = 1
+	state.text_transform = state.canvas_pv * linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0})
+	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
+	sg.apply_uniforms(0, {&state.text_transform, size_of(Transform)})
+	sg.draw(0, 6, math.min(len(text_box.text), int(state.frame / 4)))
+}
+
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
     // TODO
 }
@@ -389,15 +393,19 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 
 /* Event Handling */
 
-handle_text_input :: proc(raw_text: []u8) {
+input_text :: proc(raw_text: []u8) {
     text := string(cstring(raw_data(raw_text)))
-    state.user_input = strings.concatenate({state.user_input, text})
+    state.user_console.text = strings.concatenate({state.user_console.text, text})
 }
 
-handle_command_key :: proc() {
-    // TODO:
-    // backspace
-    // enter
-    // left/right
-    // delete
+input_newline :: proc() {
+    state.user_console.text = strings.concatenate({state.user_console.text, "\n"})
+}
+
+input_backspace :: proc() {
+    state.user_console.text = state.user_console.text[:math.max(0, len(state.user_console.text) - 1)]
+}
+
+input_delete :: proc() {
+
 }
