@@ -40,22 +40,26 @@ Font_Instance :: struct {
 	pos_max: [2]f32,
 	uv_min:  [2]f32,
 	uv_max:  [2]f32,
+	depth:   f32,
 	color:   Color,
 }
 
 Text_Uniforms :: struct {
     transform: Transform,
-    boundary: f32,
+    boundary: Vec3,
 }
 
 Text_Box :: struct {
-    text: string,
+    text: strings.Builder,
     font_state: fs.State,
     rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
     scale: f32, // Use whole numbers to preserve pixel font rendering
+    cursor: Vec2, // Bottom-right of the last character to be drawn
     uniforms: Text_Uniforms,
 }
 
+Vec2 :: [2]f32
+Vec3 :: [3]f32
 Color :: [4]f32
 Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
 Transform :: matrix[4, 4]f32
@@ -83,7 +87,7 @@ view_init :: proc() {
 	state_init_debug()
 
 	state.user_console = {
-	    text = "Hellope!\n>",
+	    text = strings.builder_make(),
 		font_state = {
 		    font = state.font_default,
 			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
@@ -97,6 +101,7 @@ view_init :: proc() {
 		rect = {5, 5, 100, 200},
 		scale = 2,
 	}
+	strings.write_string(&state.user_console.text, "Hellope!\n>")
 }
 
 view_draw :: proc(swapchain: sg.Swapchain) {
@@ -111,7 +116,7 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 
 	draw_text_box(fc, &state.user_console)
 
-	// draw debug quad over full screen
+	// draw debug quad over top-right corner
 	sg.apply_pipeline(state.debug_pipeline)
 	sg.apply_bindings(state.debug_bindings)
 	sg.draw(0, 6, 1)
@@ -306,7 +311,8 @@ state_init_font :: proc() {
 					1 = {format = .FLOAT2},
 					2 = {format = .FLOAT2},
 					3 = {format = .FLOAT2},
-					4 = {format = .FLOAT4},
+					4 = {format = .FLOAT},
+					5 = {format = .FLOAT4},
 				},
 			},
 			colors = {
@@ -330,17 +336,20 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
     fs.PushState(fc)
     fs.__getState(fc)^ = text_box.font_state
 
-	_, _, line_height := fs.VerticalMetrics(fc)
+	ascender, descender, line_height := fs.VerticalMetrics(fc)
+	x_end: f32 = 0
 	y_bottom := line_height
+	z_min: f32 = 0
 	// write glyph info into buffer
 	quad: fs.Quad
-	iter := fs.TextIterInit(fc, 0, 0, text_box.text)
+	iter := fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text))
 	for i := 0; i < len(state.text_instances) && fs.TextIterNext(fc, &iter, &quad); i += 1 {
 		state.text_instances[i] = {
 			pos_min = {quad.x0, quad.y0},
 			pos_max = {quad.x1, quad.y1},
 			uv_min  = {quad.s0, quad.t0},
 			uv_max  = {quad.s1, quad.t1},
+			depth = f32(i),
 			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
 			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
@@ -360,10 +369,14 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		}
 		if iter.nexty > text_box.rect.w {
 		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate behavior
-		    iter = fs.TextIterInit(fc, 0, 0, text_box.text[i+1:])
+		    iter = fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text)[i+1:])
 			y_bottom = line_height
+			z_min = f32(i)
 		}
+		// TODO: place at end of final character
+		x_end = iter.nextx
 	}
+	text_box.uniforms.boundary = {x_end, y_bottom, z_min}
 
 	fs.PopState(fc)
 
@@ -379,15 +392,18 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
 	scale: f32 = 1
-	text_box.uniforms.transform = state.canvas_pv * linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) // * scale
-	text_box.uniforms.boundary = y_bottom
+	text_box.uniforms.transform =
+	    state.canvas_pv *
+		linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) *
+		linalg.matrix4_scale_f32({0..<3 = text_box.scale})
 	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
 	sg.apply_uniforms(0, {&text_box.uniforms, size_of(Text_Uniforms)})
-	sg.draw(0, 6, math.min(len(text_box.text), int(state.frame / 2)))
+	sg.draw(0, 6, math.min(len(strings.to_string(text_box.text)), int(state.frame / 2)))
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
     // TODO
+    unimplemented("Gotta resize that font atlas!")
 }
 
 // Must ignore the raw texture data passed as last param because the length has been discarded by a raw_data call, just use the context instead
@@ -410,17 +426,20 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 
 /* Event Handling */
 
+// NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
 input_text :: proc(raw_text: []u8) {
     text := string(cstring(raw_data(raw_text)))
-    state.user_console.text = strings.concatenate({state.user_console.text, text})
+    strings.write_string(&state.user_console.text, text)
+    //assert(strings.write_bytes(&state.user_console.text, raw_text) == len(raw_text))
 }
 
 input_newline :: proc() {
-    state.user_console.text = strings.concatenate({state.user_console.text, "\n"})
+    strings.write_rune(&state.user_console.text, '\n')
 }
 
 input_backspace :: proc() {
-    state.user_console.text = state.user_console.text[:math.max(0, len(state.user_console.text) - 1)]
+    //state.user_console.text = state.user_console.text[:math.max(0, len(state.user_console.text) - 1)]
+    strings.pop_rune(&state.user_console.text)
 }
 
 input_delete :: proc() {
