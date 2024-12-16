@@ -9,10 +9,20 @@ struct Instance {
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(1) color: vec4<f32>, // NOTE: if I switch back to packed u32 color, be sure to add @interpolate(flat)
 };
 
-@group(0) @binding(0) var<uniform> transform: mat4x4<f32>;
+struct Uniforms {
+    transform: mat4x4<f32>,
+    boundary: f32,
+}
+
+@group(0) @binding(0) var<uniform> uni: Uniforms;
+
+fn relu(x: f32, falloff: f32) -> f32 {
+    let x1 = x-1;
+    return max(min(1.0, max(x, -x1*x1+1)/falloff), step(x, 0.0));
+}
 
 @vertex
 fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
@@ -26,8 +36,12 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
 
     //let testColor = pack4x8unorm(vec4<f32>(0, 0, f32(inst.color), 1));
 
-    output.position = transform * vec4<f32>(pos, 0, 1);
+    // modify transparency by vertical position from overwrite boundary; no effect on anything above boundary, lerp from 0 to 1 over <distance> if below
+    let dist = pos.y - uni.boundary;
+    let fade = relu(dist, 100.0);
+
+    output.position = uni.transform * vec4<f32>(pos, 0, 1);
     output.uv       = uv;
-    output.color    = inst.color;
+    output.color    = vec4<f32>(inst.color.rgb, fade);
     return output;
 }

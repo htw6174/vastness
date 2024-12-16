@@ -26,7 +26,6 @@ View_State :: struct {
 	text_pipeline:  sg.Pipeline,
 	text_instances: []Font_Instance,
 	text_buffer:    sg.Buffer,
-	text_transform: Transform,
 
 	// text buffers
 	user_console: Text_Box,
@@ -44,11 +43,17 @@ Font_Instance :: struct {
 	color:   Color,
 }
 
+Text_Uniforms :: struct {
+    transform: Transform,
+    boundary: f32,
+}
+
 Text_Box :: struct {
     text: string,
     font_state: fs.State,
     rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
     scale: f32, // Use whole numbers to preserve pixel font rendering
+    uniforms: Text_Uniforms,
 }
 
 Color :: [4]f32
@@ -89,7 +94,7 @@ view_init :: proc() {
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {5, 5, 100, 50},
+		rect = {5, 5, 100, 200},
 		scale = 2,
 	}
 }
@@ -216,8 +221,6 @@ state_init_font :: proc() {
 		false,
 	)
 
-	state.text_transform = linalg.identity_matrix(Transform) // in Odin, can also do mat4x4 = 1
-
 	state.text_instances = make([]Font_Instance, MAX_FONT_INSTANCES)
 
 	font_instance_buffer := sg.alloc_buffer()
@@ -233,7 +236,7 @@ state_init_font :: proc() {
 	)
 	sg.init_buffer(
 		font_const_buffer,
-		sg.Buffer_Desc{type = .DEFAULT, usage = .DYNAMIC, size = size_of(Transform)},
+		sg.Buffer_Desc{type = .DEFAULT, usage = .DYNAMIC, size = size_of(Text_Uniforms)},
 	)
 
 	font_sampler := sg.make_sampler(
@@ -273,10 +276,10 @@ state_init_font :: proc() {
 			uniform_blocks = {
 				0 = {
 					stage = .VERTEX,
-					size = size_of(Transform),
+					size = size_of(Text_Uniforms),
 					wgsl_group0_binding_n = 0,
 					layout = .NATIVE,
-				},
+				}
 			},
 			images = {
 				0 = {
@@ -328,6 +331,7 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
     fs.__getState(fc)^ = text_box.font_state
 
 	_, _, line_height := fs.VerticalMetrics(fc)
+	y_bottom := line_height
 	// write glyph info into buffer
 	quad: fs.Quad
 	iter := fs.TextIterInit(fc, 0, 0, text_box.text)
@@ -345,16 +349,19 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
 			iter.nexty += line_height
+			y_bottom += line_height
 		}
         // DESIRED BEHAVIOR: never draw a glyph with any part outside rect bounds. On horizontal overflow, move to next line. On vertical overflow, move to top-left (initial) position
 	    // For now, just check nextx
 		if iter.nextx > text_box.rect.z {
 		    iter.nextx = 0
 			iter.nexty += line_height
+			y_bottom += line_height
 		}
 		if iter.nexty > text_box.rect.w {
 		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate behavior
 		    iter = fs.TextIterInit(fc, 0, 0, text_box.text[i+1:])
+			y_bottom = line_height
 		}
 	}
 
@@ -372,10 +379,11 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
 	scale: f32 = 1
-	state.text_transform = state.canvas_pv * linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0})
+	text_box.uniforms.transform = state.canvas_pv * linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) // * scale
+	text_box.uniforms.boundary = y_bottom
 	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
-	sg.apply_uniforms(0, {&state.text_transform, size_of(Transform)})
-	sg.draw(0, 6, math.min(len(text_box.text), int(state.frame / 4)))
+	sg.apply_uniforms(0, {&text_box.uniforms, size_of(Text_Uniforms)})
+	sg.draw(0, 6, math.min(len(text_box.text), int(state.frame / 2)))
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
