@@ -27,7 +27,7 @@ fn relu(x: f32, falloff: f32) -> f32 {
 }
 
 @vertex
-fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
+fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32, inst: Instance) -> VertexOutput {
     var output: VertexOutput;
 
     let left   = bool(vertex & 1);
@@ -43,7 +43,8 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     // if lower but glyph is after boundary, gradually fade in
     let dist = pos.y - uni.boundary.y;
     let fade = relu(dist, 100.0);
-    let a = select(1.0, fade, inst.depth < uni.boundary.z);
+    //let a = select(1.0, fade, inst.depth < uni.boundary.z);
+    let a = select(1.0, fade, f32(index) < uni.boundary.z);
 
     output.position = uni.transform * vec4<f32>(pos, 0, 1);
     output.uv       = uv;

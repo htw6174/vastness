@@ -55,6 +55,8 @@ Text_Box :: struct {
     rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
     scale: f32, // Use whole numbers to preserve pixel font rendering
     cursor: Vec2, // Bottom-right of the last character to be drawn
+    first_visible_instance: int,
+    visible_instance_count: int,
     uniforms: Text_Uniforms,
 }
 
@@ -98,16 +100,25 @@ view_init :: proc() {
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {5, 5, 100, 200},
+		rect = {5, 5, 300, 200},
 		scale = 2,
 	}
 	strings.write_string(&state.user_console.text, "Hellope!\n>")
+
+	placeholder := `Odin is a general-purpose programming language with distinct typing built for high performance, modern systems and data-oriented programming.
+Odin is the C alternative for the Joy of Programming.
+Odin has been designed for readability, scalability, and orthogonality of concepts. Simplicity is complicated to get right, clear is better than clever.
+Odin allows for the highest performance through low-level control over the memory layout, memory management and custom allocators and so much more.
+Odin is designed from the bottom up for the modern computer, with built-in support for SOA data types, array programming, and other features.
+We go into programming because we love to solve problems. Why shouldn't our tools bring us joy whilst doing it? Enjoy programming again, with Odin!`
+    strings.write_string(&state.user_console.text, placeholder)
 }
 
 view_draw :: proc(swapchain: sg.Swapchain) {
 	sg.begin_pass(sg.Pass{action = pass_action, swapchain = swapchain})
 
 	width, height := window_get_render_bounds()
+	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	state.canvas_pv = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 
 	fc := &state.font_context
@@ -339,11 +350,13 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 	ascender, descender, line_height := fs.VerticalMetrics(fc)
 	x_end: f32 = 0
 	y_bottom := line_height
-	z_min: f32 = 0
+	// prev_page_start will be index of the first drawn instance
+	curr_page_start, prev_page_start, last_instance: int = 0, 0, 0
 	// write glyph info into buffer
 	quad: fs.Quad
 	iter := fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text))
-	for i := 0; i < len(state.text_instances) && fs.TextIterNext(fc, &iter, &quad); i += 1 {
+	glyph_max := min(len(state.text_instances), int(state.frame))
+	for i := 0; i < glyph_max && fs.TextIterNext(fc, &iter, &quad); i += 1 {
 		state.text_instances[i] = {
 			pos_min = {quad.x0, quad.y0},
 			pos_max = {quad.x1, quad.y1},
@@ -355,11 +368,13 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
 			color   = Color{0, 0, 0, 1},
 		}
+		// Horizontal wrap on newline characters
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
 			iter.nexty += line_height
 			y_bottom += line_height
 		}
+		// Horizontal wrap on text box overflow
         // DESIRED BEHAVIOR: never draw a glyph with any part outside rect bounds. On horizontal overflow, move to next line. On vertical overflow, move to top-left (initial) position
 	    // For now, just check nextx
 		if iter.nextx > text_box.rect.z {
@@ -367,38 +382,40 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 			iter.nexty += line_height
 			y_bottom += line_height
 		}
+		// Vertical wrap on text box overflow
 		if iter.nexty > text_box.rect.w {
-		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate behavior
+		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate TextIterInit's behavior
 		    iter = fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text)[i+1:])
 			y_bottom = line_height
-			z_min = f32(i)
+			prev_page_start = curr_page_start
+			curr_page_start = i + 1
 		}
 		// TODO: place at end of final character
 		x_end = iter.nextx
+		last_instance = i + 1
 	}
-	text_box.uniforms.boundary = {x_end, y_bottom, z_min}
+	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
+	text_box.uniforms.boundary = {x_end, y_bottom, f32(curr_page_start - prev_page_start)}
+	text_box.first_visible_instance = prev_page_start
+	text_box.visible_instance_count = last_instance - prev_page_start
 
 	fs.PopState(fc)
 
 	// TODO: helper for turning a slice/small array into sg.Range
 	sg.update_buffer(
 		state.text_buffer,
-		{ptr = raw_data(state.text_instances), size = size_of(Font_Instance) * MAX_FONT_INSTANCES},
+		range_from_slice(state.text_instances[text_box.first_visible_instance:]),
 	)
 
 	sg.apply_pipeline(state.text_pipeline)
 	sg.apply_bindings(state.text_bindings)
 
-	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
-	//state.text_transform = linalg.matrix4_translate_f32({-1, 0.8, 0})
-	scale: f32 = 1
 	text_box.uniforms.transform =
 	    state.canvas_pv *
 		linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) *
-		linalg.matrix4_scale_f32({0..<3 = text_box.scale})
-	//state.canvas_pv = linalg.matrix4_scale_f32({scale, scale, scale}) * state.canvas_pv
-	sg.apply_uniforms(0, {&text_box.uniforms, size_of(Text_Uniforms)})
-	sg.draw(0, 6, math.min(len(strings.to_string(text_box.text)), int(state.frame / 2)))
+		linalg.matrix4_scale_f32(text_box.scale)
+	sg.apply_uniforms(0, range_from_type(&text_box.uniforms))
+	sg.draw(0, 6, text_box.visible_instance_count)
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
@@ -444,4 +461,12 @@ input_backspace :: proc() {
 
 input_delete :: proc() {
 
+}
+
+range_from_type :: proc(t: ^$T) -> sg.Range {
+    return sg.Range{t, size_of(T)}
+}
+
+range_from_slice :: proc(s: []$T) -> sg.Range {
+    return sg.Range{raw_data(s), len(s) * size_of(T)}
 }
