@@ -15,6 +15,9 @@ struct VertexOutput {
 
 struct Uniforms {
     transform: mat4x4<f32>,
+    // x: normalized progress along line of last glyph
+    // y: position of line break below last glyph
+    // z: instance index of first glyph in top page
     boundary: vec3<f32>,
 }
 
@@ -41,7 +44,7 @@ fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32,
     // modify transparency by glyph position from overwrite boundary:
     // if depth is lower than boundary.z and position is before boundary.xy, glyph should be transparent
     // if lower but glyph is after boundary, gradually fade in
-    let dist = pos.y - uni.boundary.y;
+    let dist = pos.y - ((20.0 * uni.boundary.x) + uni.boundary.y);
     let fade = relu(dist, 100.0);
     //let a = select(1.0, fade, inst.depth < uni.boundary.z);
     let a = select(1.0, fade, f32(index) < uni.boundary.z);

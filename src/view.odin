@@ -40,7 +40,7 @@ Font_Instance :: struct {
 	pos_max: [2]f32,
 	uv_min:  [2]f32,
 	uv_max:  [2]f32,
-	depth:   f32,
+	depth:   f32, // TODO: remove; unused
 	color:   Color,
 }
 
@@ -395,7 +395,7 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		last_instance = i + 1
 	}
 	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
-	text_box.uniforms.boundary = {x_end, y_bottom, f32(curr_page_start - prev_page_start)}
+	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(curr_page_start - prev_page_start)}
 	text_box.first_visible_instance = prev_page_start
 	text_box.visible_instance_count = last_instance - prev_page_start
 
