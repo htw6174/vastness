@@ -46,8 +46,8 @@ fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32,
     // if lower but glyph is after boundary, gradually fade in
     let dist = pos.y - ((20.0 * uni.boundary.x) + uni.boundary.y);
     let fade = relu(dist, 100.0);
-    //let a = select(1.0, fade, inst.depth < uni.boundary.z);
     let a = select(1.0, fade, f32(index) < uni.boundary.z);
+    //let a = 1.0;
 
     output.position = uni.transform * vec4<f32>(pos, 0, 1);
     output.uv       = uv;

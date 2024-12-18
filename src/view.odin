@@ -25,6 +25,8 @@ View_State :: struct {
 	text_bindings:  sg.Bindings,
 	text_pipeline:  sg.Pipeline,
 	text_instances: []Font_Instance,
+	// Pair of scratch buffers to hold the top 2 pages of glyphs when composing a text box
+	text_instance_scratch: [2][]Font_Instance,
 	text_buffer:    sg.Buffer,
 
 	// text buffers
@@ -55,8 +57,9 @@ Text_Box :: struct {
     rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
     scale: f32, // Use whole numbers to preserve pixel font rendering
     cursor: Vec2, // Bottom-right of the last character to be drawn
-    first_visible_instance: int,
-    visible_instance_count: int,
+    // TODO: shouldn't a start & count just be a slice? Maybe no, because I need to set the vertex buffer offset later
+    instance_start: int,
+    instance_count: int,
     uniforms: Text_Uniforms,
 }
 
@@ -68,6 +71,7 @@ Transform :: matrix[4, 4]f32
 
 DEFAULT_FONT_ATLAS_SIZE :: 512
 MAX_FONT_INSTANCES :: 1024
+MAX_FONT_PAGE_INSTANCES :: 1024
 
 @(private = "file")
 state: View_State
@@ -238,6 +242,8 @@ state_init_font :: proc() {
 	)
 
 	state.text_instances = make([]Font_Instance, MAX_FONT_INSTANCES)
+	state.text_instance_scratch[0] = make([]Font_Instance, MAX_FONT_PAGE_INSTANCES)
+	state.text_instance_scratch[1] = make([]Font_Instance, MAX_FONT_PAGE_INSTANCES)
 
 	font_instance_buffer := sg.alloc_buffer()
 	state.text_buffer = font_instance_buffer
@@ -350,19 +356,20 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 	ascender, descender, line_height := fs.VerticalMetrics(fc)
 	x_end: f32 = 0
 	y_bottom := line_height
-	// prev_page_start will be index of the first drawn instance
-	curr_page_start, prev_page_start, last_instance: int = 0, 0, 0
 	// write glyph info into buffer
 	quad: fs.Quad
 	iter := fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text))
+	// TODO: more flexible way to roll out glyphs over multiple frames
 	glyph_max := min(len(state.text_instances), int(state.frame))
+	scratch_index := 0
+	page_lengths := [2]int{0, 0}
+	c := 0
 	for i := 0; i < glyph_max && fs.TextIterNext(fc, &iter, &quad); i += 1 {
-		state.text_instances[i] = {
+		state.text_instance_scratch[scratch_index][c] = {
 			pos_min = {quad.x0, quad.y0},
 			pos_max = {quad.x1, quad.y1},
 			uv_min  = {quad.s0, quad.t0},
 			uv_max  = {quad.s1, quad.t1},
-			depth = f32(i),
 			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
 			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
@@ -384,30 +391,41 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		}
 		// Vertical wrap on text box overflow
 		if iter.nexty > text_box.rect.w {
+		    // Swap which scratch buffer we're using
+			page_lengths[scratch_index] = c + 1
+			c = 0
+			scratch_index = 1 - scratch_index
+			page_lengths[scratch_index] = 0
 		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate TextIterInit's behavior
 		    iter = fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text)[i+1:])
 			y_bottom = line_height
-			prev_page_start = curr_page_start
-			curr_page_start = i + 1
 		}
 		// TODO: place at end of final character
 		x_end = iter.nextx
-		last_instance = i + 1
+		c += 1
 	}
 	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
-	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(curr_page_start - prev_page_start)}
-	text_box.first_visible_instance = prev_page_start
-	text_box.visible_instance_count = last_instance - prev_page_start
+	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(page_lengths[1 - scratch_index])}
+	text_box.instance_count = c + page_lengths[1 - scratch_index]
+
+	// Copy scratch buffers into main instance buffer
+	// Must copy prior scratch buffer first, and last used second
+	// TODO: bounds checking
+	scratch_prev := state.text_instance_scratch[1 - scratch_index]
+	copy_slice(state.text_instances, scratch_prev[:page_lengths[1 - scratch_index]])
+	copy_slice(state.text_instances[page_lengths[1 - scratch_index]:], state.text_instance_scratch[scratch_index][:c])
+
 
 	fs.PopState(fc)
 
-	// TODO: helper for turning a slice/small array into sg.Range
+	// TODO: only update instances that were written to this frame
 	sg.update_buffer(
 		state.text_buffer,
-		range_from_slice(state.text_instances[text_box.first_visible_instance:]),
+		range_from_slice(state.text_instances),
 	)
 
 	sg.apply_pipeline(state.text_pipeline)
+	// TODO: update vertex data offset
 	sg.apply_bindings(state.text_bindings)
 
 	text_box.uniforms.transform =
@@ -415,7 +433,7 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) *
 		linalg.matrix4_scale_f32(text_box.scale)
 	sg.apply_uniforms(0, range_from_type(&text_box.uniforms))
-	sg.draw(0, 6, text_box.visible_instance_count)
+	sg.draw(0, 6, text_box.instance_count)
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
