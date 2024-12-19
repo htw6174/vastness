@@ -375,6 +375,7 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
 			color   = Color{0, 0, 0, 1},
 		}
+		c += 1
 		// Horizontal wrap on newline characters
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
@@ -392,7 +393,7 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		// Vertical wrap on text box overflow
 		if iter.nexty > text_box.rect.w {
 		    // Swap which scratch buffer we're using
-			page_lengths[scratch_index] = c + 1
+			page_lengths[scratch_index] = c
 			c = 0
 			scratch_index = 1 - scratch_index
 			page_lengths[scratch_index] = 0
@@ -402,7 +403,6 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		}
 		// TODO: place at end of final character
 		x_end = iter.nextx
-		c += 1
 	}
 	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
 	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(page_lengths[1 - scratch_index])}
@@ -412,8 +412,11 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 	// Must copy prior scratch buffer first, and last used second
 	// TODO: bounds checking
 	scratch_prev := state.text_instance_scratch[1 - scratch_index]
-	copy_slice(state.text_instances, scratch_prev[:page_lengths[1 - scratch_index]])
-	copy_slice(state.text_instances[page_lengths[1 - scratch_index]:], state.text_instance_scratch[scratch_index][:c])
+	length_prev := page_lengths[1 - scratch_index]
+	scratch_curr := state.text_instance_scratch[scratch_index]
+	// length_curr := c
+	copy_slice(state.text_instances, scratch_prev[:length_prev])
+	copy_slice(state.text_instances[length_prev:], scratch_curr[:c])
 
 
 	fs.PopState(fc)
