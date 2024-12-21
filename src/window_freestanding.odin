@@ -132,6 +132,34 @@ window_draw :: proc() {
 		return
 	}
 
+	// event handling
+	// TODO: SDL_StartTextInput is enabled by default on desktop, but disabled by default on mobile. Should add a hotkey and touchable area to begin console input and call SDL_StartTextInput, then end text input after de-selecting the console (or when on-screen keyboard is collapsed?)
+	assert(bool(sdl2.IsTextInputActive()))
+	sdl2.PumpEvents()
+	event: sdl2.Event
+	if sdl2.PollEvent(&event) {
+		#partial switch event.type {
+		case .WINDOWEVENT:
+		    if event.window.event == .SIZE_CHANGED {
+				// NOTE: window pixel width and height in e.window.data1 & data2
+				configure_surface()
+			}
+		case .KEYDOWN:
+			#partial switch event.key.keysym.sym {
+			case .ESCAPE:
+			// TODO: request exit (only on desktop!)
+			case .RETURN:
+				input_newline()
+			case .BACKSPACE:
+				input_backspace()
+			}
+		// NOTE: only captures visible glyphs and non-newline whitespace
+		case .TEXTINPUT:
+			//s := string(cstring(raw_data(event.text.text[:])))
+			input_text(event.text.text[:])
+		}
+	}
+
 	render_texture := wgpu.SurfaceGetCurrentTexture(state.surface)
 	// check texture status, re-configure surface if needed
 	switch render_texture.status {
@@ -170,9 +198,12 @@ configure_surface :: proc() {
 }
 
 window_get_render_bounds :: proc() -> (width, height: u32) {
-	iw, ih: c.int
-	sdl2.GetWindowSize(state.window, &iw, &ih)
-	return u32(iw), u32(ih)
+	//iw, ih: c.int
+	//sdl2.GetWindowSize(state.window, &iw, &ih)
+	//return u32(iw), u32(ih)
+	dw, dh: f64
+	get_canvas_size(&dw, &dh)
+	return u32(dw), u32(dh)
 }
 
 window_get_surface :: proc(instance: wgpu.Instance) -> wgpu.Surface {
@@ -189,6 +220,7 @@ window_get_surface :: proc(instance: wgpu.Instance) -> wgpu.Surface {
 
 foreign _ {
 	slog_func :: proc "c" (tag: cstring, log_level: u32, log_item_id: u32, message: cstring, line: u32, filename: cstring, usr_data: rawptr) ---
+	get_canvas_size :: proc "c" (width, height: ^f64) ---
 }
 
 // Required for importing stb_truetype, because the freestanding lib is built with Odin's vendor libc

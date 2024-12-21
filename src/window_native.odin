@@ -160,6 +160,11 @@ window_draw :: proc() {
 	event: sdl2.Event
 	if sdl2.PollEvent(&event) {
 		#partial switch event.type {
+		case .WINDOWEVENT:
+		    if event.window.event == .SIZE_CHANGED {
+				// NOTE: window pixel width and height in e.window.data1 & data2
+				configure_surface()
+			}
 		case .KEYDOWN:
 			#partial switch event.key.keysym.sym {
 			case .ESCAPE:
@@ -218,6 +223,8 @@ configure_surface :: proc() {
 window_get_render_bounds :: proc() -> (width, height: u32) {
 	iw, ih: c.int
 	sdl2.GetWindowSize(state.window, &iw, &ih)
+	//ddpi, hdpi, vdpi: f32
+	//sdl2.GetDisplayDPI(sdl2.GetWindowDisplayIndex(state.window), &ddpi, &hdpi, &fdpi)
 	return u32(iw), u32(ih)
 }
 
