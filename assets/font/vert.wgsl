@@ -18,7 +18,8 @@ struct Uniforms {
     // x: normalized progress along line of last glyph
     // y: position of line break below last glyph
     // z: instance index of first glyph in top page
-    boundary: vec3<f32>,
+    // w: distance from y to bottom of text box
+    boundary: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -44,8 +45,9 @@ fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32,
     // modify transparency by glyph position from overwrite boundary:
     // if depth is lower than boundary.z and position is before boundary.xy, glyph should be transparent
     // if lower but glyph is after boundary, gradually fade in
+    // TODO: constant 20 should be replaced with line height, determined by font
     let dist = pos.y - ((20.0 * uni.boundary.x) + uni.boundary.y);
-    let fade = relu(dist, 100.0);
+    let fade = relu(dist, uni.boundary.w);
     let a = select(1.0, fade, f32(index) < uni.boundary.z);
     //let a = 1.0;
 

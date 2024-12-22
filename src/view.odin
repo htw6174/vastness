@@ -4,6 +4,7 @@ import "core:c"
 import "core:strings"
 import "core:math"
 import "core:math/linalg"
+import "core:math/rand"
 import sg "sokol/gfx"
 import fs "vendor:fontstash"
 
@@ -30,7 +31,8 @@ View_State :: struct {
 	text_buffer:    sg.Buffer,
 
 	// text buffers
-	user_console: Text_Box,
+	text_boxes: [10]Text_Box,
+	focused_text: int,
 }
 
 Shapes :: struct {
@@ -48,7 +50,7 @@ Font_Instance :: struct {
 
 Text_Uniforms :: struct {
     transform: Transform,
-    boundary: Vec3,
+    boundary: Vec4,
 }
 
 Text_Box :: struct {
@@ -65,12 +67,13 @@ Text_Box :: struct {
 
 Vec2 :: [2]f32
 Vec3 :: [3]f32
+Vec4 :: [4]f32
 Color :: [4]f32
 Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
 Transform :: matrix[4, 4]f32
 
 DEFAULT_FONT_ATLAS_SIZE :: 512
-MAX_FONT_INSTANCES :: 1024
+MAX_FONT_INSTANCES :: 1024 * 16
 MAX_FONT_PAGE_INSTANCES :: 1024
 
 @(private = "file")
@@ -92,7 +95,23 @@ view_init :: proc() {
 	state_init_font()
 	state_init_debug()
 
-	state.user_console = {
+	// Construct some sample text boxes
+	entry_box := Text_Box {
+	    text = strings.builder_make(),
+		font_state = {
+		    font = state.font_default,
+			size = 20,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		rect = {5, 5, 200, 96},
+		scale = 2,
+	}
+	strings.write_string(&entry_box.text, "Hellope!\nYou can type \ninto this box.\n>")
+	state.text_boxes[0] = entry_box
+
+	long_box := Text_Box {
 	    text = strings.builder_make(),
 		font_state = {
 		    font = state.font_default,
@@ -104,10 +123,9 @@ view_init :: proc() {
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {5, 5, 300, 200},
-		scale = 2,
+		rect = {800, 5, 300, 200},
+		scale = 1,
 	}
-	strings.write_string(&state.user_console.text, "Hellope!\n>")
 
 	placeholder := `Odin is a general-purpose programming language with distinct typing built for high performance, modern systems and data-oriented programming.
 Odin is the C alternative for the Joy of Programming.
@@ -115,7 +133,24 @@ Odin has been designed for readability, scalability, and orthogonality of concep
 Odin allows for the highest performance through low-level control over the memory layout, memory management and custom allocators and so much more.
 Odin is designed from the bottom up for the modern computer, with built-in support for SOA data types, array programming, and other features.
 We go into programming because we love to solve problems. Why shouldn't our tools bring us joy whilst doing it? Enjoy programming again, with Odin!`
-    strings.write_string(&state.user_console.text, placeholder)
+    strings.write_string(&long_box.text, placeholder)
+
+    state.text_boxes[1] = long_box
+
+    matrix_box := Text_Box {
+	    text = strings.builder_make(),
+		font_state = {
+		    font = state.font_default,
+			size = 20,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		rect = {500, 5, 1, 300}, // NOTE: width must be >0 for fadeout effect to work
+		scale = 2,
+	}
+
+	state.text_boxes[2] = matrix_box
 }
 
 view_draw :: proc(swapchain: sg.Swapchain) {
@@ -125,16 +160,19 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	state.canvas_pv = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 
-	fc := &state.font_context
-	fs.BeginState(fc)
-	defer fs.EndState(fc)
+	draw_ui()
 
-	draw_text_box(fc, &state.user_console)
+	// update matrix text box
+	if state.frame % 8 == 0 {
+		if strings.builder_len(state.text_boxes[2].text) > 1024 do strings.builder_reset(&state.text_boxes[2].text)
+	    rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
+	    strings.write_byte(&state.text_boxes[2].text, rand_byte)
+	}
 
 	// draw debug quad over top-right corner
-	sg.apply_pipeline(state.debug_pipeline)
-	sg.apply_bindings(state.debug_bindings)
-	sg.draw(0, 6, 1)
+	// sg.apply_pipeline(state.debug_pipeline)
+	// sg.apply_bindings(state.debug_bindings)
+	// sg.draw(0, 6, 1)
 
 	sg.end_pass()
 	sg.commit()
@@ -349,7 +387,21 @@ state_init_font :: proc() {
 	)
 }
 
-draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
+draw_ui :: proc() {
+
+	fc := &state.font_context
+	fs.BeginState(fc)
+	defer fs.EndState(fc)
+
+	sg.apply_pipeline(state.text_pipeline)
+	box_instances := state.text_instances
+    for &box in state.text_boxes {
+        box_instances = draw_text_box(fc, &box, box_instances)
+    }
+}
+
+draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer: []Font_Instance) -> []Font_Instance {
+    if strings.builder_len(text_box.text) == 0 do return instance_buffer[:]
     fs.PushState(fc)
     fs.__getState(fc)^ = text_box.font_state
 
@@ -405,30 +457,29 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		x_end = iter.nextx
 	}
 	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
-	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(page_lengths[1 - scratch_index])}
-	text_box.instance_count = c + page_lengths[1 - scratch_index]
+	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(page_lengths[1 - scratch_index]), text_box.rect.w - y_bottom}
+	length_prev := page_lengths[1 - scratch_index]
+	// length_curr := c
+	text_box.instance_count = c + length_prev
 
 	// Copy scratch buffers into main instance buffer
 	// Must copy prior scratch buffer first, and last used second
 	// TODO: bounds checking
 	scratch_prev := state.text_instance_scratch[1 - scratch_index]
-	length_prev := page_lengths[1 - scratch_index]
 	scratch_curr := state.text_instance_scratch[scratch_index]
-	// length_curr := c
-	copy_slice(state.text_instances, scratch_prev[:length_prev])
-	copy_slice(state.text_instances[length_prev:], scratch_curr[:c])
+	copy_slice(instance_buffer, scratch_prev[:length_prev])
+	copy_slice(instance_buffer[length_prev:], scratch_curr[:c])
 
 
 	fs.PopState(fc)
 
 	// TODO: only update instances that were written to this frame
-	sg.update_buffer(
+	offset := sg.append_buffer(
 		state.text_buffer,
-		range_from_slice(state.text_instances),
+		range_from_slice(instance_buffer[:text_box.instance_count]),
 	)
 
-	sg.apply_pipeline(state.text_pipeline)
-	// TODO: update vertex data offset
+	state.text_bindings.vertex_buffer_offsets[0] = offset
 	sg.apply_bindings(state.text_bindings)
 
 	text_box.uniforms.transform =
@@ -437,6 +488,8 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box) {
 		linalg.matrix4_scale_f32(text_box.scale)
 	sg.apply_uniforms(0, range_from_type(&text_box.uniforms))
 	sg.draw(0, 6, text_box.instance_count)
+
+	return instance_buffer[text_box.instance_count:]
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
@@ -467,17 +520,17 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
 input_text :: proc(raw_text: []u8) {
     text := string(cstring(raw_data(raw_text)))
-    strings.write_string(&state.user_console.text, text)
+    strings.write_string(&state.text_boxes[state.focused_text].text, text)
     //assert(strings.write_bytes(&state.user_console.text, raw_text) == len(raw_text))
 }
 
 input_newline :: proc() {
-    strings.write_rune(&state.user_console.text, '\n')
+    strings.write_rune(&state.text_boxes[state.focused_text].text, '\n')
 }
 
 input_backspace :: proc() {
     //state.user_console.text = state.user_console.text[:math.max(0, len(state.user_console.text) - 1)]
-    strings.pop_rune(&state.user_console.text)
+    strings.pop_rune(&state.text_boxes[state.focused_text].text)
 }
 
 input_delete :: proc() {
