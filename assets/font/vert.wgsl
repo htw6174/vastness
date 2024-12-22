@@ -47,7 +47,7 @@ fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32,
     // if lower but glyph is after boundary, gradually fade in
     // TODO: constant 20 should be replaced with line height, determined by font
     let dist = pos.y - ((20.0 * uni.boundary.x) + uni.boundary.y);
-    let fade = relu(dist, uni.boundary.w);
+    let fade = relu(dist, min(96.0, uni.boundary.w));
     let a = select(1.0, fade, f32(index) < uni.boundary.z);
     //let a = 1.0;
 

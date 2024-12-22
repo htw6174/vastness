@@ -123,7 +123,7 @@ view_init :: proc() {
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {800, 5, 300, 200},
+		rect = {800, 5, 300, 400},
 		scale = 1,
 	}
 
