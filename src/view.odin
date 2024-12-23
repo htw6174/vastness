@@ -21,6 +21,7 @@ View_State :: struct {
 	// font & text
 	font_context:   fs.FontContext,
 	font_default:   int,
+	fonts:          [4]int,
 	font_state:     fs.State,
 	font_atlas:     sg.Image,
 	text_bindings:  sg.Bindings,
@@ -51,13 +52,16 @@ Font_Instance :: struct {
 Text_Uniforms :: struct {
     transform: Transform,
     boundary: Vec4,
+    line_height: f32,
 }
 
 Text_Box :: struct {
     text: strings.Builder,
     font_state: fs.State,
+    color: Color, // TODO: text box creation proc to ensure this defaults to an opaque value
     rect: Rect, // In screen-space pixels. Text will wrap before going over this rect's left or bottom
-    scale: f32, // Use whole numbers to preserve pixel font rendering
+    // NOTE: for pixel fonts, prefer using native font size and scaling by whole numbers. For other fonts, prefer using a large font size and scaling down
+    scale: f32, // font_state.size * scale = text height on screen. Use whole numbers to preserve pixel font rendering
     cursor: Vec2, // Bottom-right of the last character to be drawn
     // TODO: shouldn't a start & count just be a slice? Maybe no, because I need to set the vertex buffer offset later
     instance_start: int,
@@ -86,7 +90,7 @@ view_init :: proc() {
 	state.frame = 0
 	pass_action.colors[0] = {
 		load_action = .CLEAR,
-		clear_value = {.5, .5, .5, 1},
+		clear_value = {0, 0, 0, 1},
 	}
 
 	state_init_shapes()
@@ -99,14 +103,15 @@ view_init :: proc() {
 	entry_box := Text_Box {
 	    text = strings.builder_make(),
 		font_state = {
-		    font = state.font_default,
-			size = 20,
+		    font = state.fonts[0],
+			size = 40,
 			// Defaults: Left, Baseline
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {5, 5, 200, 96},
-		scale = 2,
+		color = {1, 1, 1, 1},
+		rect = {5, 5, 400, 192},
+		scale = 1,
 	}
 	strings.write_string(&entry_box.text, "Hellope!\nYou can type \ninto this box.\n>")
 	state.text_boxes[0] = entry_box
@@ -114,15 +119,16 @@ view_init :: proc() {
 	long_box := Text_Box {
 	    text = strings.builder_make(),
 		font_state = {
-		    font = state.font_default,
+		    font = state.fonts[0],
 			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
 			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
 			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
-			size = 20,
+			size = 40,
 			// Defaults: Left, Baseline
 			ah = .LEFT,
 			av = .TOP,
 		},
+		color = {0.8, 0.8, 0.8, 1},
 		rect = {800, 5, 300, 400},
 		scale = 1,
 	}
@@ -146,7 +152,8 @@ We go into programming because we love to solve problems. Why shouldn't our tool
 			ah = .LEFT,
 			av = .TOP,
 		},
-		rect = {500, 5, 1, 300}, // NOTE: width must be >0 for fadeout effect to work
+		color = {0, 1, 0, 1},
+		rect = {500, 5, 1, 600}, // NOTE: width must be >0 for fadeout effect to work
 		scale = 2,
 	}
 
@@ -275,7 +282,14 @@ state_init_font :: proc() {
 	state.font_default = fs.AddFontMem(
 		&state.font_context,
 		"Default",
+		// TODO: pick some system font with wide character support, like droid*
 		#load("../assets/font/Darinia.ttf"),
+		false,
+	)
+	state.fonts[0] = fs.AddFontMem(
+	    &state.font_context,
+		"Yulong",
+		#load("../assets/font/Yulong-Regular.ttf"),
 		false,
 	)
 
@@ -301,7 +315,7 @@ state_init_font :: proc() {
 
 	font_sampler := sg.make_sampler(
 		sg.Sampler_Desc {
-			min_filter = .NEAREST,
+			min_filter = .LINEAR,
 			mag_filter = .NEAREST,
 			mipmap_filter = .NEAREST,
 			wrap_u = .CLAMP_TO_EDGE,
@@ -406,18 +420,18 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
     fs.__getState(fc)^ = text_box.font_state
 
 	ascender, descender, line_height := fs.VerticalMetrics(fc)
-	x_end: f32 = 0
-	y_bottom := line_height
+	x_end: f32 = 0 // Just past end of current line
+	y_bottom := line_height // Just below last line on current page
+	rect := text_box.rect / text_box.scale // Effective area available to place glyphs
 	// write glyph info into buffer
 	quad: fs.Quad
 	iter := fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text))
 	// TODO: more flexible way to roll out glyphs over multiple frames
 	glyph_max := min(len(state.text_instances), int(state.frame))
 	scratch_index := 0
-	page_lengths := [2]int{0, 0}
-	c := 0
+	curr_length, prev_length := 0, 0 // Number of instances drawn on each page
 	for i := 0; i < glyph_max && fs.TextIterNext(fc, &iter, &quad); i += 1 {
-		state.text_instance_scratch[scratch_index][c] = {
+		state.text_instance_scratch[scratch_index][curr_length] = {
 			pos_min = {quad.x0, quad.y0},
 			pos_max = {quad.x1, quad.y1},
 			uv_min  = {quad.s0, quad.t0},
@@ -425,10 +439,11 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
 			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
 			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
 			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
-			color   = Color{0, 0, 0, 1},
+			color   = text_box.color,
 		}
-		c += 1
+		curr_length += 1
 		// Horizontal wrap on newline characters
+		// FIXME: skip creating an instance for newline (and other whitespace?) characters, to avoid the font's 'missing' glyph appearing
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
 			iter.nexty += line_height
@@ -437,19 +452,18 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
 		// Horizontal wrap on text box overflow
         // DESIRED BEHAVIOR: never draw a glyph with any part outside rect bounds. On horizontal overflow, move to next line. On vertical overflow, move to top-left (initial) position
 	    // For now, just check nextx
-		if iter.nextx > text_box.rect.z {
+		if iter.nextx > rect.z {
 		    iter.nextx = 0
 			iter.nexty += line_height
 			y_bottom += line_height
 		}
 		// Vertical wrap on text box overflow
-		if iter.nexty > text_box.rect.w {
+		if iter.nexty > rect.w {
 		    // Swap which scratch buffer we're using
-			page_lengths[scratch_index] = c
-			c = 0
+			prev_length = curr_length
+			curr_length = 0
 			scratch_index = 1 - scratch_index
-			page_lengths[scratch_index] = 0
-		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator, or replicate TextIterInit's behavior
+		    // Can't just set nexty to 0; IterInit adds to the initial y based on state properties. Need to re-initialize iterator with remaining text
 		    iter = fs.TextIterInit(fc, 0, 0, strings.to_string(text_box.text)[i+1:])
 			y_bottom = line_height
 		}
@@ -457,18 +471,17 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
 		x_end = iter.nextx
 	}
 	// Shader instance index always starts at 0, so boundary must be relative to first instance drawn
-	text_box.uniforms.boundary = {x_end / text_box.rect.z, y_bottom, f32(page_lengths[1 - scratch_index]), text_box.rect.w - y_bottom}
-	length_prev := page_lengths[1 - scratch_index]
-	// length_curr := c
-	text_box.instance_count = c + length_prev
+	text_box.uniforms.boundary = {x_end / rect.z, y_bottom, f32(prev_length), rect.w - (math.remainder(rect.w, line_height))}
+	text_box.uniforms.line_height = line_height
+	text_box.instance_count = prev_length + curr_length
 
 	// Copy scratch buffers into main instance buffer
 	// Must copy prior scratch buffer first, and last used second
 	// TODO: bounds checking
 	scratch_prev := state.text_instance_scratch[1 - scratch_index]
 	scratch_curr := state.text_instance_scratch[scratch_index]
-	copy_slice(instance_buffer, scratch_prev[:length_prev])
-	copy_slice(instance_buffer[length_prev:], scratch_curr[:c])
+	copy_slice(instance_buffer, scratch_prev[:prev_length])
+	copy_slice(instance_buffer[prev_length:], scratch_curr[:curr_length])
 
 
 	fs.PopState(fc)

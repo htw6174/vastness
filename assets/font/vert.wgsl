@@ -18,12 +18,14 @@ struct Uniforms {
     // x: normalized progress along line of last glyph
     // y: position of line break below last glyph
     // z: instance index of first glyph in top page
-    // w: distance from y to bottom of text box
+    // w: usable height of text box (greatest multiple of line_height < box height), used to determine when top page fade should start
     boundary: vec4<f32>,
+    line_height: f32,
 }
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
 
+// Return 0 when x<0, 1 when x>falloff, lerp in between
 fn relu(x: f32, falloff: f32) -> f32 {
     //let x1 = x-1;
     //return max(min(1.0, max(x, -x1*x1+1)/falloff), step(x, 0.0));
@@ -45,10 +47,12 @@ fn main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32,
     // modify transparency by glyph position from overwrite boundary:
     // if depth is lower than boundary.z and position is before boundary.xy, glyph should be transparent
     // if lower but glyph is after boundary, gradually fade in
-    // TODO: constant 20 should be replaced with line height, determined by font
-    let dist = pos.y - ((20.0 * uni.boundary.x) + uni.boundary.y);
-    let fade = relu(dist, min(96.0, uni.boundary.w));
-    let a = select(1.0, fade, f32(index) < uni.boundary.z);
+    let dist = pos.y - ((uni.line_height * uni.boundary.x) + uni.boundary.y);
+    let falloff_dist = uni.line_height * 1.0;
+    let fade_bottom = relu(dist, falloff_dist);
+    // Fade top page when boundary approaches bottom of text box
+    let fade_top = relu(dist + uni.boundary.w, falloff_dist);
+    let a = select(fade_top, fade_bottom, f32(index) < uni.boundary.z);
     //let a = 1.0;
 
     output.position = uni.transform * vec4<f32>(pos, 0, 1);
