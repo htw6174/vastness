@@ -113,7 +113,7 @@ view_init :: proc() {
 		rect = {5, 5, 400, 192},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "Hellope!\nYou can type \ninto this box.\n>")
+	strings.write_string(&entry_box.text, "Hellope!\nYou can type into this box.\n>")
 	state.text_boxes[0] = entry_box
 
 	long_box := Text_Box {
