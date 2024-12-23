@@ -7,12 +7,15 @@ import "core:math/linalg"
 import "core:math/rand"
 import sg "sokol/gfx"
 import fs "vendor:fontstash"
+import "sim"
 
 pass_action: sg.Pass_Action
 
 View_State :: struct {
 	frame:          u64,
 	canvas_pv:      Transform,
+	camera_pv:      Transform,
+	camera:         Camera,
 
 	// debug quad
 	debug_bindings: sg.Bindings,
@@ -34,6 +37,11 @@ View_State :: struct {
 	// text buffers
 	text_boxes: [10]Text_Box,
 	focused_text: int,
+
+	// particles
+	particle_bindings: sg.Bindings,
+	particle_pipeline: sg.Pipeline,
+	particle_instances: []Particle_Instance
 }
 
 Shapes :: struct {
@@ -69,6 +77,22 @@ Text_Box :: struct {
     uniforms: Text_Uniforms,
 }
 
+Particle_Instance :: struct {
+    position: Vec3,
+}
+
+Particle_Uniforms :: struct {
+    pv: Transform,
+}
+
+Camera :: struct {
+    position: Vec3,
+    rotation: quaternion128,
+    fov: f32,
+    near_clip: f32,
+    far_clip: f32,
+}
+
 Vec2 :: [2]f32
 Vec3 :: [3]f32
 Vec4 :: [4]f32
@@ -79,6 +103,8 @@ Transform :: matrix[4, 4]f32
 DEFAULT_FONT_ATLAS_SIZE :: 512
 MAX_FONT_INSTANCES :: 1024 * 16
 MAX_FONT_PAGE_INSTANCES :: 1024
+
+MAX_PARTICLE_INSTANCES :: 1024 * 8
 
 @(private = "file")
 state: View_State
@@ -93,11 +119,20 @@ view_init :: proc() {
 		clear_value = {0, 0, 0, 1},
 	}
 
+	state.camera = {
+	    position = {0, 0, -10},
+		rotation = linalg.QUATERNIONF32_IDENTITY,
+	    near_clip = 0.1,
+		far_clip = 1000,
+		fov =45,
+	}
+
 	state_init_shapes()
 
 	// fontstash: init, add defult font
 	state_init_font()
 	state_init_debug()
+	state_init_particles()
 
 	// Construct some sample text boxes
 	entry_box := Text_Box {
@@ -116,37 +151,13 @@ view_init :: proc() {
 	strings.write_string(&entry_box.text, "Hellope!\nYou can type into this box.\n>")
 	state.text_boxes[0] = entry_box
 
-	long_box := Text_Box {
-	    text = strings.builder_make(),
-		font_state = {
-		    font = state.fonts[0],
-			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
-			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
-			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
-			size = 40,
-			// Defaults: Left, Baseline
-			ah = .LEFT,
-			av = .TOP,
-		},
-		color = {0.8, 0.8, 0.8, 1},
-		rect = {800, 5, 300, 400},
-		scale = 1,
-	}
-
-	placeholder := `Odin is a general-purpose programming language with distinct typing built for high performance, modern systems and data-oriented programming.
-Odin is the C alternative for the Joy of Programming.
-Odin has been designed for readability, scalability, and orthogonality of concepts. Simplicity is complicated to get right, clear is better than clever.
-Odin allows for the highest performance through low-level control over the memory layout, memory management and custom allocators and so much more.
-Odin is designed from the bottom up for the modern computer, with built-in support for SOA data types, array programming, and other features.
-We go into programming because we love to solve problems. Why shouldn't our tools bring us joy whilst doing it? Enjoy programming again, with Odin!`
-    strings.write_string(&long_box.text, placeholder)
-
-    state.text_boxes[1] = long_box
-
     matrix_box := Text_Box {
 	    text = strings.builder_make(),
 		font_state = {
 		    font = state.font_default,
+						// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
+			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
+			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
 			size = 20,
 			// Defaults: Left, Baseline
 			ah = .LEFT,
@@ -166,6 +177,11 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	width, height := window_get_render_bounds()
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	state.canvas_pv = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
+	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
+	state.camera_pv = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
+
+	state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
+	state.camera_pv = state.camera_pv * linalg.matrix4_translate_f32(state.camera.position) // TODO: rotation
 
 	draw_ui()
 
@@ -175,6 +191,8 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	    rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
 	    strings.write_byte(&state.text_boxes[2].text, rand_byte)
 	}
+
+	draw_particles()
 
 	// draw debug quad over top-right corner
 	// sg.apply_pipeline(state.debug_pipeline)
@@ -203,6 +221,55 @@ state_init_shapes :: proc() {
 			data = sg.Range{raw_data(quad_indicies), size_of(u32) * len(quad_indicies)},
 		},
 	)
+}
+
+state_init_particles :: proc() {
+    state.particle_instances = make([]Particle_Instance, MAX_PARTICLE_INSTANCES)
+
+    particle_instance_buffer := sg.make_buffer({
+        type = .VERTEXBUFFER,
+        usage = .DYNAMIC,
+        size = size_of(Particle_Instance) * MAX_PARTICLE_INSTANCES,
+    })
+    state.particle_bindings = {
+        vertex_buffers = {0 = particle_instance_buffer},
+        index_buffer = shapes.quad_index_buffer,
+    }
+
+    particle_shader := sg.make_shader({
+        vertex_func = {source = #load("../assets/particle/vert.wgsl", cstring)},
+        fragment_func = {source = #load("../assets/particle/frag.wgsl", cstring)},
+        uniform_blocks = {
+            0 = {
+                stage = .VERTEX,
+                size = size_of(Particle_Uniforms),
+                wgsl_group0_binding_n = 0,
+                layout = .NATIVE,
+            }
+        }
+    })
+
+    state.particle_pipeline = sg.make_pipeline({
+        shader = particle_shader,
+        layout = {
+            buffers = {0 = {step_func = .PER_INSTANCE}},
+            attrs = {
+                0 = {format = .FLOAT3},
+            }
+        },
+        colors = {
+            0 = {
+                blend = {
+                    enabled = true,
+                    src_factor_rgb = .SRC_ALPHA,
+                    dst_factor_rgb = .ONE_MINUS_SRC_ALPHA,
+					src_factor_alpha = .SRC_ALPHA,
+					dst_factor_alpha = .ONE_MINUS_SRC_ALPHA,
+                }
+            }
+        },
+        index_type = .UINT32,
+    })
 }
 
 state_init_debug :: proc() {
@@ -505,6 +572,14 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
 	return instance_buffer[text_box.instance_count:]
 }
 
+draw_particles :: proc() {
+    sg.apply_pipeline(state.particle_pipeline)
+    sg.apply_bindings(state.particle_bindings)
+    uniforms := Particle_Uniforms{pv = state.camera_pv}
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+}
+
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
     // TODO
     unimplemented("Gotta resize that font atlas!")
@@ -549,6 +624,8 @@ input_backspace :: proc() {
 input_delete :: proc() {
 
 }
+
+/* Sokol utilities */
 
 range_from_type :: proc(t: ^$T) -> sg.Range {
     return sg.Range{t, size_of(T)}
