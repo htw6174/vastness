@@ -3,6 +3,7 @@ package main
 
 import "core:c"
 import "core:fmt"
+import sa "core:container/small_array"
 
 import sg "sokol/gfx"
 import slog "sokol/log"
@@ -23,8 +24,23 @@ WindowState :: struct {
 
 @(private = "file")
 state: WindowState
+keybinds: sa.Small_Array(256, Keybind)
 
 slog_func := slog.func
+
+// expose input enums to module without requiring SDL import
+Keycode :: sdl2.Keycode
+Bind_Trigger :: enum u32 {
+    HOLD = 0,
+    PRESS = u32(sdl2.EventType.KEYUP),
+    RELEASE = u32(sdl2.EventType.KEYDOWN),
+}
+
+Keybind :: struct {
+    keycode: Keycode,
+    trigger: Bind_Trigger,
+    callback: proc(),
+}
 
 window_init :: proc() {
 	// Initialize SDL
@@ -155,10 +171,10 @@ window_draw :: proc() {
 
 	// event handling
 	// TODO: SDL_StartTextInput is enabled by default on desktop, but disabled by default on mobile. Should add a hotkey and touchable area to begin console input and call SDL_StartTextInput, then end text input after de-selecting the console (or when on-screen keyboard is collapsed?)
-	assert(bool(sdl2.IsTextInputActive()))
+	//assert(bool(sdl2.IsTextInputActive()))
 	sdl2.PumpEvents()
 	event: sdl2.Event
-	if sdl2.PollEvent(&event) {
+	for sdl2.PollEvent(&event) {
 		#partial switch event.type {
 		case .WINDOWEVENT:
 		    if event.window.event == .SIZE_CHANGED {
@@ -169,15 +185,32 @@ window_draw :: proc() {
 			#partial switch event.key.keysym.sym {
 			case .ESCAPE:
 			// TODO: request exit (only on desktop!)
-			case .RETURN:
-				input_newline()
-			case .BACKSPACE:
-				input_backspace()
+			case .BACKQUOTE:
+			    if sdl2.IsTextInputActive() {
+					sdl2.StopTextInput()
+				} else {
+				    sdl2.StartTextInput()
+				}
+			}
+			for bind in sa.slice(&keybinds) {
+			    if event.key.keysym.sym == bind.keycode { //&& event.type == sdl2.EventType(bind.trigger) {
+					bind.callback()
+				}
 			}
 		// NOTE: only captures visible glyphs and non-newline whitespace
 		case .TEXTINPUT:
 			//s := string(cstring(raw_data(event.text.text[:])))
 			input_text(event.text.text[:])
+		}
+	}
+
+	// TODO: check keyboard state for held bindings
+	keyboard_state := sdl2.GetKeyboardStateAsSlice()
+	for bind in sa.slice(&keybinds) {
+	    if bind.trigger == .HOLD {
+			if keyboard_state[int(sdl2.GetScancodeFromKey(bind.keycode))] > 0 {
+			    bind.callback()
+			}
 		}
 	}
 
@@ -230,4 +263,8 @@ window_get_render_bounds :: proc() -> (width, height: u32) {
 
 window_get_surface :: proc(instance: wgpu.Instance) -> wgpu.Surface {
 	return sdl2glue.GetSurface(instance, state.window)
+}
+
+window_register_keybind :: proc(keybind: Keybind) {
+    sa.append(&keybinds, keybind)
 }

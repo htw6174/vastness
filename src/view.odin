@@ -87,6 +87,7 @@ Particle_Uniforms :: struct {
 
 Camera :: struct {
     position: Vec3,
+    velocity: Vec3,
     rotation: quaternion128,
     fov: f32,
     near_clip: f32,
@@ -126,6 +127,14 @@ view_init :: proc() {
 		far_clip = 1000,
 		fov =45,
 	}
+
+	// input setup
+	window_register_keybind({.RETURN, .PRESS, input_newline})
+	window_register_keybind({.BACKSPACE, .PRESS, input_backspace})
+	window_register_keybind({.E, .HOLD, camera_forward})
+	window_register_keybind({.D, .HOLD, camera_back})
+	window_register_keybind({.S, .HOLD, camera_left})
+	window_register_keybind({.F, .HOLD, camera_right})
 
 	state_init_shapes()
 
@@ -180,12 +189,15 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
 	state.camera_pv = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
 
-	state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
+	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
+	state.camera.position += state.camera.velocity * 0.0166 // TODO: use deltatime
+	state.camera.velocity = 0
 	state.camera_pv = state.camera_pv * linalg.matrix4_translate_f32(state.camera.position) // TODO: rotation
 
 	draw_ui()
 
 	// update matrix text box
+	state.text_boxes[2].rect.x = f32(width) - 40
 	if state.frame % 8 == 0 {
 		if strings.builder_len(state.text_boxes[2].text) > 1024 do strings.builder_reset(&state.text_boxes[2].text)
 	    rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
@@ -604,6 +616,22 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 
 
 /* Event Handling */
+
+camera_forward :: proc() {
+    state.camera.velocity.y = 1
+}
+
+camera_back :: proc() {
+    state.camera.velocity.y = -1
+}
+
+camera_left :: proc() {
+    state.camera.velocity.x = -1
+}
+
+camera_right :: proc() {
+    state.camera.velocity.x = 1
+}
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
 input_text :: proc(raw_text: []u8) {
