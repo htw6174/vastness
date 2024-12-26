@@ -5,6 +5,7 @@ import "core:strings"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+
 import sg "sokol/gfx"
 import fs "vendor:fontstash"
 import "sim"
@@ -41,7 +42,8 @@ View_State :: struct {
 	// particles
 	particle_bindings: sg.Bindings,
 	particle_pipeline: sg.Pipeline,
-	particle_instances: []Particle_Instance
+	particle_instances: [dynamic]Particle_Instance,
+	particle_buffer:   sg.Buffer,
 }
 
 Shapes :: struct {
@@ -89,6 +91,7 @@ Camera :: struct {
     position: Vec3,
     velocity: Vec3,
     rotation: quaternion128,
+    angular_velocity: Vec3,
     fov: f32,
     near_clip: f32,
     far_clip: f32,
@@ -125,16 +128,16 @@ view_init :: proc() {
 		rotation = linalg.QUATERNIONF32_IDENTITY,
 	    near_clip = 0.1,
 		far_clip = 1000,
-		fov =45,
+		fov = 45,
 	}
 
 	// input setup
-	window_register_keybind({.RETURN, .PRESS, input_newline})
-	window_register_keybind({.BACKSPACE, .PRESS, input_backspace})
-	window_register_keybind({.E, .HOLD, camera_forward})
-	window_register_keybind({.D, .HOLD, camera_back})
-	window_register_keybind({.S, .HOLD, camera_left})
-	window_register_keybind({.F, .HOLD, camera_right})
+	window_register_edit_bind({.RETURN, .PRESS, input_newline})
+	window_register_edit_bind({.BACKSPACE, .PRESS, input_backspace})
+	window_register_control_bind({.E, .HOLD, camera_forward})
+	window_register_control_bind({.D, .HOLD, camera_back})
+	window_register_control_bind({.S, .HOLD, camera_left})
+	window_register_control_bind({.F, .HOLD, camera_right})
 
 	state_init_shapes()
 
@@ -186,13 +189,19 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	width, height := window_get_render_bounds()
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	state.canvas_pv = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
+	view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
 	state.camera_pv = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
 
 	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
 	state.camera.position += state.camera.velocity * 0.0166 // TODO: use deltatime
+	//state.camera.rotation = linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	state.camera.velocity = 0
-	state.camera_pv = state.camera_pv * linalg.matrix4_translate_f32(state.camera.position) // TODO: rotation
+	state.camera_pv = state.camera_pv *
+	    linalg.matrix4_translate_f32(state.camera.position) *
+		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+
+	draw_particles()
 
 	draw_ui()
 
@@ -203,8 +212,6 @@ view_draw :: proc(swapchain: sg.Swapchain) {
 	    rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
 	    strings.write_byte(&state.text_boxes[2].text, rand_byte)
 	}
-
-	draw_particles()
 
 	// draw debug quad over top-right corner
 	// sg.apply_pipeline(state.debug_pipeline)
@@ -236,13 +243,20 @@ state_init_shapes :: proc() {
 }
 
 state_init_particles :: proc() {
-    state.particle_instances = make([]Particle_Instance, MAX_PARTICLE_INSTANCES)
+    state.particle_instances = make([dynamic]Particle_Instance, 0, MAX_PARTICLE_INSTANCES)
+
+    // TEMP TEST: insert some particles
+    for i in 0..<20 {
+        pos: Vec3 = {rand.float32_range(-5, 5), rand.float32_range(-3, 3), -2.0 + 4.0 * (f32(i) / 20.0)}
+        append(&state.particle_instances, Particle_Instance{position = pos})
+    }
 
     particle_instance_buffer := sg.make_buffer({
         type = .VERTEXBUFFER,
         usage = .DYNAMIC,
         size = size_of(Particle_Instance) * MAX_PARTICLE_INSTANCES,
     })
+    state.particle_buffer = particle_instance_buffer
     state.particle_bindings = {
         vertex_buffers = {0 = particle_instance_buffer},
         index_buffer = shapes.quad_index_buffer,
@@ -585,11 +599,13 @@ draw_text_box :: proc(fc: ^fs.FontContext, text_box: ^Text_Box, instance_buffer:
 }
 
 draw_particles :: proc() {
+    sg.update_buffer(state.particle_buffer, range_from_slice(state.particle_instances[:]))
+
     sg.apply_pipeline(state.particle_pipeline)
     sg.apply_bindings(state.particle_bindings)
     uniforms := Particle_Uniforms{pv = state.camera_pv}
     sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
+    sg.draw(0, 6, len(state.particle_instances))
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
