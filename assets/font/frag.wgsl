@@ -10,6 +10,7 @@ fn main(@location(0) uv: vec2<f32>, @location(1) color: vec4<f32>) -> @location(
     // DEBUG
     //let background = vec4<f32>(uv.x, uv.y, 0, 1);
     //return mix(background, albedo, texColor.r);
+    //return vec4<f32>(1, 1, 1, 1);
 
     return albedo * tint;
 }

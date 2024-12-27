@@ -1,9 +1,0 @@
-lib/*
-!lib/.gitkeep
-example/web/triangle.wasm
-example/web/wgpu.js
-example/web/runtime.js
-example/example
-example/example.exe
-example/triangle
-example/triangle.exe

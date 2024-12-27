@@ -3,7 +3,9 @@ package main
 import "base:runtime"
 import "core:mem"
 
+import "platform"
 import "sim"
+import "view"
 
 ctx: runtime.Context
 
@@ -13,12 +15,27 @@ tempAllocatorArena: mem.Arena
 mainMemoryData: [mem.Megabyte * 16]byte
 mainMemoryArena: mem.Arena
 
+view_state: ^view.State
 world: ^sim.World
 
 when ODIN_OS != .Freestanding {
 	main :: proc() {
 		start()
-		window_loop()
+		counter_freq := platform.get_counter_frequency()
+		time_now := platform.get_counter()
+		time_last := time_now
+		acc: f64 = 0
+		for !platform.should_quit() {
+			time_now := platform.get_counter()
+			dt := f64(time_now - time_last) / f64(counter_freq)
+			acc += dt
+			if acc > 1 {
+				//fmt.printfln("last frame: %.3fms", dt * 1000)
+				acc -= 1
+			}
+			step()
+			time_last = time_now
+		}
 		stop()
 	}
 }
@@ -41,8 +58,12 @@ start :: proc "c" () {
 	assert(x != nil)
 	free(x)
 
-	world = sim.init()
-	window_init()
+	world = new(sim.World)
+	sim.init(world)
+
+	view_state = new(view.State)
+	view_state.world = world
+	view.init(view_state)
 }
 
 @(export, link_name = "step")
@@ -50,18 +71,14 @@ step :: proc "contextless" () {
 	context = ctx
 	free_all(context.temp_allocator)
 
-	window_draw()
 	sim.step(world)
+	view.step(view_state)
 }
 
 @(export, link_name = "stop")
 stop :: proc "contextless" () {
 	context = ctx
 
-	window_shutdown()
 	sim.fini(world)
-}
-
-slog_basic :: proc(message: cstring, line: u32 = #line, file: cstring = #file) {
-	slog_func("main", 3, 0, message, line, file, nil)
+	view.fini(view_state)
 }
