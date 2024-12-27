@@ -21,7 +21,7 @@ init :: proc(world: ^World) {
 
     // TEST a few randomly positioned bodies
     for i in 0..<20 {
-        asteroid := Body{ position = {rand.float64_range(-5, 5), rand.float64_range(-3, 3), -2.0 + 4.0 * (f64(i) / 20.0)} }
+        asteroid := Body{ position = {rand.float64_range(-5, 5), rand.float64_range(-3, 3), rand.float64_range(-2, 2)} }// -2.0 + 4.0 * (f64(i) / 20.0)} }
         append(&world.asteroids, asteroid)
     }
 }

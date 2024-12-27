@@ -14,8 +14,6 @@ import "../sim"
 
 ASSET_DIR :: "../../assets/"
 
-pass_action: sg.Pass_Action
-
 State :: struct {
 	frame:          u64,
 	world:          ^sim.World,
@@ -24,6 +22,8 @@ State :: struct {
 	canvas_pv:      Transform,
 	camera_pv:      Transform,
 	camera:         Camera,
+
+	pass_action:    sg.Pass_Action,
 
 	// debug quad
 	debug_bindings: sg.Bindings,
@@ -131,9 +131,13 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state.frame = 0
 
 	// Initialize sokol_gfx
-	pass_action.colors[0] = {
-		load_action = .CLEAR,
-		clear_value = {0, 0, 0, 1},
+	state.pass_action = {
+    	colors = {
+            0 = {
+          		load_action = .CLEAR,
+          		clear_value = {0, 0, 0, 1},
+           	}
+        }
 	}
 
 	state.camera = {
@@ -147,7 +151,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	sg.setup(
 		sg.Desc {
 			environment = {
-				defaults = {color_format = .BGRA8, depth_format = .NONE},
+				defaults = {color_format = .BGRA8, depth_format = .DEPTH},
 				wgpu = {device = device},
 			},
 			logger = {func = platform.slog_func},
@@ -158,8 +162,9 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state.swapchain = sg.Swapchain {
 		width = 1280, // TODO: does this need to be the same as the window dimensions at startup?
 		height = 720,
-		sample_count = 1,
-		color_format = .BGRA8,
+		// Commented lines get default value from sokol environment, must only assign if different
+		//sample_count = 1,
+		//color_format = .BGRA8,
 		//depth_format = .DEPTH_STENCIL,
 		wgpu = {render_view = nil, resolve_view = nil, depth_stencil_view = nil},
 	}
@@ -217,37 +222,40 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 }
 
 step :: proc(state: ^State) {
-    render_view := platform.frame_begin()
-    if render_view == nil {
-        return
-    } else {
+    ready, render_view, resolve_view, depth_scencil_view := platform.frame_begin()
+    if ready {
         state.swapchain.wgpu.render_view = render_view
+        state.swapchain.wgpu.resolve_view = resolve_view
+        state.swapchain.wgpu.depth_stencil_view = depth_scencil_view
+    } else {
+        return
     }
     defer platform.frame_end()
 
     platform.poll_events(handle_event, state)
     handle_input_state(state)
 
-	sg.begin_pass(sg.Pass{action = pass_action, swapchain = state.swapchain})
+	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
 
 	width, height := platform.get_render_bounds()
 	canvas_view := linalg.MATRIX4F32_IDENTITY // TODO?
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
-	state.canvas_pv = canvas_view * canvas_perspective
-	view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
-	cam_view := linalg.MATRIX4F32_IDENTITY // TODO
-	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
-	cam_perspective := linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
-	state.camera_pv = cam_view * cam_perspective
+	state.canvas_pv = canvas_perspective * canvas_view
 
 	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
-	state.camera.position += state.camera.velocity * 0.0166 // TODO: use deltatime
+	state.camera.position += state.camera.velocity * 0.03 // TODO: use deltatime
 	//state.camera.rotation = linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	state.camera.velocity = 0
-	state.camera_pv = state.camera_pv *
-	    linalg.matrix4_translate_f32(state.camera.position) *
-		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+	// state.camera_pv = state.camera_pv *
+	//     linalg.matrix4_translate_f32(state.camera.position) *
+	// 	linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+
+	cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
+	//cam_view := linalg.MATRIX4F32_IDENTITY // TODO
+	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
+	cam_perspective := linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
+	state.camera_pv = cam_perspective * cam_view
 
 	// Add asteroids to particle buffer
 	clear(&state.particle_instances)
@@ -346,6 +354,10 @@ state_init_particles :: proc(state: ^State) {
             }
         },
         index_type = .UINT32,
+        depth = {
+            write_enabled = true,
+            compare = .LESS_EQUAL,
+        }
     })
 }
 

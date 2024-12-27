@@ -22,8 +22,13 @@ WindowState :: struct {
 	adapter:     wgpu.Adapter,
 	device:      wgpu.Device,
 	config:      wgpu.SurfaceConfiguration,
+	surface_changed: bool,
 	render_texture: wgpu.SurfaceTexture,
 	render_view: wgpu.TextureView,
+	resolve_texture: wgpu.Texture, // TODO: currently not using msaa resolve
+	resolve_view: wgpu.TextureView,
+	depth_stencil_texture: wgpu.Texture,
+	depth_stencil_view: wgpu.TextureView,
 }
 
 // Required for callbacks from wgpu
@@ -112,11 +117,10 @@ window_init :: proc(initialized_callback: proc(user_data: rawptr, device: rawptr
 		}
 		state.device = device
 
-		width, height := get_render_bounds()
-
+		// Surface config defaults, shouldn't need to change at runtime
 		// TODO: why does this fill with junk on wasm?
 		// Not sure what's wrong, but hardcoding the surface color format is fine for now
-		capabilities := wgpu.SurfaceGetCapabilities(state.surface, state.adapter)
+		// capabilities := wgpu.SurfaceGetCapabilities(state.surface, state.adapter)
 		// assert(capabilities.formatCount > 0)
 		// for i in 0 ..< capabilities.formatCount {
 		// 	f := fmt.ctprintf("Format: %v", capabilities.formats[i])
@@ -128,12 +132,10 @@ window_init :: proc(initialized_callback: proc(user_data: rawptr, device: rawptr
 			device      = state.device,
 			usage       = {.RenderAttachment},
 			format      = .BGRA8Unorm,
-			width       = width,
-			height      = height,
 			presentMode = .FifoRelaxed,
 			//alphaMode   = .Opaque,
 		}
-		wgpu.SurfaceConfigure(state.surface, &state.config)
+		swapchain_create()
 
 		state.initialized = true
 		state.initialized_callback(userdata, device)
@@ -141,9 +143,14 @@ window_init :: proc(initialized_callback: proc(user_data: rawptr, device: rawptr
 }
 
 // return handle to surface texture that will be presented at frame_end, or nil if surface isn't ready
-frame_begin :: proc() -> (render_view: rawptr) {
+frame_begin :: proc() -> (ready: bool, render_view: rawptr, resolve_view: rawptr, depth_stencil_view: rawptr) {
 	if !state.initialized {
-		return nil
+		return false, nil, nil, nil
+	}
+
+	if state.surface_changed {
+	    swapchain_refresh()
+		state.surface_changed = false
 	}
 
 	state.render_texture = wgpu.SurfaceGetCurrentTexture(state.surface)
@@ -155,15 +162,14 @@ frame_begin :: proc() -> (render_view: rawptr) {
 		if state.render_texture.texture != nil {
 			wgpu.TextureRelease(state.render_texture.texture)
 		}
-		configure_surface()
-		return
+		swapchain_refresh()
+		return false, nil, nil, nil
 	case .DeviceLost, .OutOfMemory:
 		panic("Surface texture device error")
 	}
 	state.render_view = wgpu.TextureCreateView(state.render_texture.texture)
-	// TODO: create and use depth buffer texture
 	//state.swapchain.wgpu.depth_stencil_view =
-	return state.render_view
+	return true, state.render_view, state.resolve_view, state.depth_stencil_view
 }
 
 poll_events :: proc(event_callback: Event_Handler, user_data: rawptr) {
@@ -175,8 +181,8 @@ poll_events :: proc(event_callback: Event_Handler, user_data: rawptr) {
 		    state.want_quit = true
 		case .WINDOWEVENT:
 		    if event.window.event == .SIZE_CHANGED {
-				// NOTE: window pixel width and height in e.window.data1 & data2
-				configure_surface()
+				// NOTE: window pixel width and height available in e.window.data1 & data2
+				state.surface_changed = true
 			}
 		case .KEYDOWN:
 			#partial switch event.key.keysym.sym {
@@ -209,15 +215,44 @@ should_quit :: proc() -> bool {
     return state.want_quit
 }
 
-@(private = "file")
+@(private)
 get_surface :: proc(instance: wgpu.Instance) -> wgpu.Surface {
 	return sdl2glue.GetSurface(instance, state.window)
 }
 
-@(private = "file")
-configure_surface :: proc() {
-	state.config.width, state.config.height = get_render_bounds()
-	wgpu.SurfaceConfigure(state.surface, &state.config)
+@(private)
+swapchain_create :: proc() {
+    state.config.width, state.config.height = get_render_bounds()
+    wgpu.SurfaceConfigure(state.surface, &state.config)
+
+	depth_scencil_descriptor := wgpu.TextureDescriptor{
+	    usage = {.RenderAttachment},
+		dimension = ._2D,
+		size = {
+		    width = state.config.width,
+			height = state.config.height,
+			depthOrArrayLayers = 1,
+		},
+		format = .Depth32Float,
+		mipLevelCount = 1,
+		sampleCount = 1, // TODO: how to determine? Must match other render textures?
+	}
+	state.depth_stencil_texture = wgpu.DeviceCreateTexture(state.device, &depth_scencil_descriptor)
+	state.depth_stencil_view = wgpu.TextureCreateView(state.depth_stencil_texture)
+}
+
+@(private)
+swapchain_release :: proc() {
+    if state.resolve_view != nil do wgpu.TextureViewRelease(state.resolve_view)
+    if state.resolve_texture != nil do wgpu.TextureRelease(state.resolve_texture)
+    if state.depth_stencil_view != nil do wgpu.TextureViewRelease(state.depth_stencil_view)
+    if state.depth_stencil_texture != nil do wgpu.TextureRelease(state.depth_stencil_texture)
+}
+
+@(private)
+swapchain_refresh :: proc() {
+    swapchain_release()
+    swapchain_create()
 }
 
 get_render_bounds :: proc() -> (width, height: u32) {
