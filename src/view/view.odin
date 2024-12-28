@@ -278,7 +278,7 @@ step :: proc(state: ^State) {
 	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
 	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
 	// Make rotation matrix from combined quaternions (multiply them all together)
-	state.camera.rotation = state.camera.rotation * q_pitch * q_yaw * q_roll
+	state.camera.rotation = q_roll * q_yaw * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
 	cam_view :=
