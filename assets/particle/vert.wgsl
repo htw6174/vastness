@@ -20,10 +20,14 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     let left   = bool(vertex & 1);
     let bottom = bool((vertex >> 1) & 1);
 
-    let uv    = vec2<f32>(select(1.0, 0.0, left), select(1.0, 0.0, bottom));
-    let pos   = vec3<f32>(uv - 0.5, 0) + inst.position;
+    let uv = vec2<f32>(select(1.0, 0.0, left), select(1.0, 0.0, bottom));
+    // Because this skips the aspect ratio correction provided by the projection matrix, must manually apply the correction
+    let corner = vec3<f32>(uv - 0.5, 0);
 
-    output.position = uni.pv * vec4<f32>(pos, 1);
+    // Transform instance position to ndc space
+    let pos = uni.pv * vec4<f32>(inst.position, 1);
+    // scale quad corner offset by transformed position .w
+    output.position = pos + vec4<f32>(corner * pos.w, 0);
     output.uv       = uv;
     return output;
 }

@@ -33,7 +33,7 @@ step :: proc(world: ^World) {
         p: [4]f64
         p.xyz = body.position.xyz
         p.w = 1
-        body.position = (p * linalg.matrix4_rotate_f64(math.PI / 60.0, {0, 1, 0})).xyz
+        body.position = (p * linalg.matrix4_rotate_f64(math.PI / 360.0, {0, 1, 0})).xyz
     }
 
 	world.step += 1

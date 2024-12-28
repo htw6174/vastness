@@ -51,10 +51,18 @@ State :: struct {
 	particle_pipeline: sg.Pipeline,
 	particle_instances: [dynamic]Particle_Instance,
 	particle_buffer:   sg.Buffer,
+
+	// solid shapes
+	solid_bindings: sg.Bindings,
+	solid_pipeline: sg.Pipeline,
 }
 
 Shapes :: struct {
+    // Verts defined in shader
 	quad_index_buffer: sg.Buffer,
+
+	cube_vertex_buffer: sg.Buffer,
+	cube_index_buffer: sg.Buffer,
 }
 
 Font_Instance :: struct {
@@ -94,6 +102,11 @@ Particle_Uniforms :: struct {
     pv: Transform,
 }
 
+Solid_Uniforms :: struct {
+    pv: Transform,
+    m: Transform,
+}
+
 Camera :: struct {
     position: Vec3,
     velocity: Vec3,
@@ -124,6 +137,22 @@ shapes: Shapes
 
 init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
+
+	// input setup
+	register_keybind({.RETURN, .PRESS, input_newline})
+	register_keybind({.BACKSPACE, .PRESS, input_backspace})
+	register_keybind({.E, .HOLD, move_forward})
+	register_keybind({.D, .HOLD, move_back})
+	register_keybind({.S, .HOLD, move_left})
+	register_keybind({.F, .HOLD, move_right})
+	register_keybind({.T, .HOLD, move_up})
+	register_keybind({.G, .HOLD, move_down})
+	register_keybind({.Q, .HOLD, pitch_up})
+	register_keybind({.A, .HOLD, pitch_down})
+	register_keybind({.W, .HOLD, yaw_left})
+	register_keybind({.R, .HOLD, yaw_right})
+	register_keybind({.C, .HOLD, roll_left})
+	register_keybind({.V, .HOLD, roll_right})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
@@ -145,7 +174,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 		rotation = linalg.QUATERNIONF32_IDENTITY,
 	    near_clip = 0.1,
 		far_clip = 1000,
-		fov = 45,
+		fov = math.PI / 4.0,
 	}
 
 	sg.setup(
@@ -169,20 +198,13 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 		wgpu = {render_view = nil, resolve_view = nil, depth_stencil_view = nil},
 	}
 
-	// input setup
-	register_keybind({.RETURN, .PRESS, input_newline})
-	register_keybind({.BACKSPACE, .PRESS, input_backspace})
-	register_keybind({.E, .HOLD, camera_forward})
-	register_keybind({.D, .HOLD, camera_back})
-	register_keybind({.S, .HOLD, camera_left})
-	register_keybind({.F, .HOLD, camera_right})
-
 	state_init_shapes()
 
 	// fontstash: init, add defult font
 	state_init_font(state)
 	state_init_debug(state)
 	state_init_particles(state)
+	state_init_solids(state)
 
 	// Construct some sample text boxes
 	entry_box := Text_Box {
@@ -198,7 +220,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 		rect = {5, 5, 400, 192},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "Hellope!\nYou can type into this box.\n>")
+	strings.write_string(&entry_box.text, "Move camera with qwertasdfgcv\nPress ` to make this\ntext box active. >>>")
 	state.text_boxes[0] = entry_box
 
     matrix_box := Text_Box {
@@ -222,6 +244,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 }
 
 step :: proc(state: ^State) {
+    dT: f32 = 0.0166 // TODO: get from main game loop
     ready, render_view, resolve_view, depth_scencil_view := platform.frame_begin()
     if ready {
         state.swapchain.wgpu.render_view = render_view
@@ -243,19 +266,36 @@ step :: proc(state: ^State) {
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 	state.canvas_pv = canvas_perspective * canvas_view
 
+	move_speed: f32 = 4.0
+	rotate_speed: f32 = 1.0
 	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
-	state.camera.position += state.camera.velocity * 0.03 // TODO: use deltatime
+	state.camera.position += state.camera.velocity * move_speed * dT
 	//state.camera.rotation = linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	state.camera.velocity = 0
-	// state.camera_pv = state.camera_pv *
-	//     linalg.matrix4_translate_f32(state.camera.position) *
-	// 	linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+	// Make quaternion from each angle-axis rotation
+	rotate_delta := state.camera.angular_velocity * rotate_speed * dT
+	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, {1, 0, 0})
+	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
+	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
+	// Make rotation matrix from combined quaternions (multiply them all together)
+	state.camera.rotation = state.camera.rotation * q_pitch * q_yaw * q_roll
+	state.camera.angular_velocity = 0
 
-	cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
-	//cam_view := linalg.MATRIX4F32_IDENTITY // TODO
+	cam_view :=
+	    linalg.matrix4_translate_f32(state.camera.position) *
+		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+
+	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
 	cam_perspective := linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
 	state.camera_pv = cam_perspective * cam_view
+
+	// draw reference cube at world origin
+	sg.apply_pipeline(state.solid_pipeline)
+	sg.apply_bindings(state.solid_bindings)
+	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
+	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
+	sg.draw(0, 36, 1)
 
 	// Add asteroids to particle buffer
 	clear(&state.particle_instances)
@@ -295,16 +335,97 @@ fini :: proc(state: ^State) {
 
 // TODO: store default meshes in view state
 state_init_shapes :: proc() {
-	shapes.quad_index_buffer = sg.alloc_buffer()
 	quad_indicies := []u32{0, 1, 2, 1, 2, 3}
-	sg.init_buffer(
-		shapes.quad_index_buffer,
-		sg.Buffer_Desc {
-			type = .INDEXBUFFER,
-			usage = .IMMUTABLE,
-			data = sg.Range{raw_data(quad_indicies), size_of(u32) * len(quad_indicies)},
-		},
-	)
+	shapes.quad_index_buffer = sg.make_buffer(sg.Buffer_Desc{
+		type = .INDEXBUFFER,
+		usage = .IMMUTABLE,
+		data = range_from_slice(quad_indicies),
+	})
+
+	cube_verts := []f32{
+	    -1.0, -1.0, -1.0,
+         1.0, -1.0, -1.0,
+         1.0,  1.0, -1.0,
+        -1.0,  1.0, -1.0,
+
+        -1.0, -1.0,  1.0,
+         1.0, -1.0,  1.0,
+         1.0,  1.0,  1.0,
+        -1.0,  1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0,  1.0, -1.0,
+        -1.0,  1.0,  1.0,
+        -1.0, -1.0,  1.0,
+
+        1.0, -1.0, -1.0,
+        1.0,  1.0, -1.0,
+        1.0,  1.0,  1.0,
+        1.0, -1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0, -1.0,  1.0,
+         1.0, -1.0,  1.0,
+         1.0, -1.0, -1.0,
+
+        -1.0,  1.0, -1.0,
+        -1.0,  1.0,  1.0,
+         1.0,  1.0,  1.0,
+         1.0,  1.0, -1.0,
+	}
+	shapes.cube_vertex_buffer = sg.make_buffer(sg.Buffer_Desc{
+	    type = .VERTEXBUFFER,
+		usage = .IMMUTABLE,
+		data = range_from_slice(cube_verts),
+	})
+
+	cube_indicies := []u32{
+	    0, 1, 2,  0, 2, 3,
+        6, 5, 4,  7, 6, 4,
+        8, 9, 10,  8, 10, 11,
+        14, 13, 12,  15, 14, 12,
+        16, 17, 18,  16, 18, 19,
+        22, 21, 20,  23, 22, 20
+    }
+	shapes.cube_index_buffer = sg.make_buffer(sg.Buffer_Desc{
+	    type = .INDEXBUFFER,
+		usage = .IMMUTABLE,
+		data = range_from_slice(cube_indicies),
+	})
+}
+
+state_init_solids :: proc(state: ^State) {
+    state.solid_bindings = {
+        vertex_buffers = {0 = shapes.cube_vertex_buffer},
+        index_buffer = shapes.cube_index_buffer,
+    }
+
+    solid_shader := sg.make_shader(sg.Shader_Desc{
+        vertex_func = {source = #load(ASSET_DIR + "solid/vert.wgsl", cstring)},
+        fragment_func = {source = #load(ASSET_DIR + "solid/frag.wgsl", cstring)},
+        uniform_blocks = {
+            0 = {
+                stage = .VERTEX,
+                size = size_of(Solid_Uniforms),
+                wgsl_group0_binding_n = 0,
+                layout = .NATIVE,
+            }
+        }
+    })
+
+    state.solid_pipeline = sg.make_pipeline(sg.Pipeline_Desc {
+        shader = solid_shader,
+        layout = {
+            buffers = {0 = {step_func = .PER_VERTEX}},
+            attrs = {0 = {format = .FLOAT3}},
+        },
+        colors = {}, // can leave as default, no transparency
+        index_type = .UINT32,
+        depth = {
+            write_enabled = true,
+            compare = .LESS_EQUAL,
+        }
+    })
 }
 
 state_init_particles :: proc(state: ^State) {
@@ -355,7 +476,7 @@ state_init_particles :: proc(state: ^State) {
         },
         index_type = .UINT32,
         depth = {
-            write_enabled = true,
+            write_enabled = false,
             compare = .LESS_EQUAL,
         }
     })
@@ -685,20 +806,52 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 
 /* Event Handling */
 
-camera_forward :: proc(state: ^State) {
-    state.camera.velocity.y = 1
+move_forward :: proc(state: ^State) {
+    state.camera.velocity.z = 1
 }
 
-camera_back :: proc(state: ^State) {
-    state.camera.velocity.y = -1
+move_back :: proc(state: ^State) {
+    state.camera.velocity.z = -1
 }
 
-camera_left :: proc(state: ^State) {
+move_left :: proc(state: ^State) {
     state.camera.velocity.x = -1
 }
 
-camera_right :: proc(state: ^State) {
+move_right :: proc(state: ^State) {
     state.camera.velocity.x = 1
+}
+
+move_up :: proc(state: ^State) {
+    state.camera.velocity.y = 1
+}
+
+move_down :: proc(state: ^State) {
+    state.camera.velocity.y = -1
+}
+
+yaw_left :: proc(state: ^State) {
+    state.camera.angular_velocity.y = -1
+}
+
+yaw_right :: proc(state: ^State) {
+    state.camera.angular_velocity.y = 1
+}
+
+pitch_up :: proc(state: ^State) {
+    state.camera.angular_velocity.x = -1
+}
+
+pitch_down :: proc(state: ^State) {
+    state.camera.angular_velocity.x = 1
+}
+
+roll_left :: proc(state: ^State) {
+    state.camera.angular_velocity.z = -1
+}
+
+roll_right :: proc(state: ^State) {
+    state.camera.angular_velocity.z = 1
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
