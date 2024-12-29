@@ -57,6 +57,9 @@ State :: struct {
 	// solid shapes
 	solid_bindings: sg.Bindings,
 	solid_pipeline: sg.Pipeline,
+
+	// visualization settings
+	sim_scale: f64 // default should be on the order of 1e-11
 }
 
 Shapes :: struct {
@@ -141,7 +144,18 @@ shapes: Shapes
 /* Callbacks used by Window */
 
 init :: proc(state: ^State) {
+    state.frame = 0
     platform.window_init(_late_init, state)
+
+	state.camera = {
+	    position = {0, 0, -10},
+		rotation = linalg.QUATERNIONF32_IDENTITY,
+	    near_clip = 0.1,
+		far_clip = 1000,
+		fov = math.PI / 4.0,
+	}
+
+	state.sim_scale = 1e-11
 
 	// input setup
 	register_keybind({.RETURN, .PRESS, input_newline})
@@ -158,11 +172,12 @@ init :: proc(state: ^State) {
 	register_keybind({.R, .HOLD, yaw_right})
 	register_keybind({.C, .HOLD, roll_left})
 	register_keybind({.V, .HOLD, roll_right})
+	register_keybind({.Z, .HOLD, zoom_in})
+	register_keybind({.X, .HOLD, zoom_out})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
     state := (^State)(raw_state)
-	state.frame = 0
 
 	// Initialize sokol_gfx
 	state.pass_action = {
@@ -172,14 +187,6 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
           		clear_value = {0, 0, 0, 1},
            	}
         }
-	}
-
-	state.camera = {
-	    position = {0, 0, -10},
-		rotation = linalg.QUATERNIONF32_IDENTITY,
-	    near_clip = 0.1,
-		far_clip = 1000,
-		fov = math.PI / 4.0,
 	}
 
 	sg.setup(
@@ -222,10 +229,10 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 			av = .TOP,
 		},
 		color = {1, 1, 1, 1},
-		rect = {5, 5, 400, 192},
+		rect = {5, 5, 400, 280},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "Move camera with qwertasdfgcv\nPress ` to make this\ntext box active. >>>")
+	strings.write_string(&entry_box.text, "Move camera with esdftg\nRotate with qawrcv\nChange scale with zx\nPress ` to make this\ntext box active. >>>")
 	state.text_boxes[0] = entry_box
 
     matrix_box := Text_Box {
@@ -314,7 +321,7 @@ step :: proc(state: ^State) {
 	clear(&state.particle_instances)
 	for asteroid in state.world.asteroids {
 	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5)
-	    append(&state.particle_instances, Particle_Instance{position_from_body(asteroid), asteroid.radius, tint})
+	    append(&state.particle_instances, Particle_Instance{position_from_body(asteroid, state.sim_scale), asteroid.radius, tint})
 	}
 	sg.update_buffer(state.particle_buffer, range_from_slice(state.particle_instances[:]))
 
@@ -870,6 +877,18 @@ roll_right :: proc(state: ^State) {
     state.camera.angular_velocity.z = 1
 }
 
+zoom_in :: proc(state: ^State) {
+    log_scale := math.log10_f64(state.sim_scale)
+    log_scale -= 0.01
+    state.sim_scale = math.pow_f64(10.0, log_scale)
+}
+
+zoom_out :: proc(state: ^State) {
+    log_scale := math.log10_f64(state.sim_scale)
+    log_scale += 0.01
+    state.sim_scale = math.pow_f64(10.0, log_scale)
+}
+
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
 input_text :: proc(state: ^State, raw_text: []u8) {
     text := string(cstring(raw_data(raw_text)))
@@ -903,6 +922,7 @@ range_from_slice :: proc(s: []$T) -> sg.Range {
 /* World visualization utilities */
 
 // TODO: later this will probably be converting from orbit parameters to position
-position_from_body :: proc(body: sim.Body) -> Vec3 {
-    return Vec3{f32(body.position.x), f32(body.position.y), f32(body.position.z)}
+position_from_body :: proc(body: sim.Body, vis_scale: f64) -> Vec3 {
+    scaled := body.position * vis_scale
+    return Vec3{f32(scaled.x), f32(scaled.y), f32(scaled.z)}
 }
