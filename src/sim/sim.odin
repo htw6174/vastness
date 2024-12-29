@@ -14,6 +14,8 @@ World :: struct {
 
 Body :: struct {
     position: Position,
+    radius: f32,
+    hue: f32,
 }
 
 Position :: [3]f64
@@ -23,7 +25,11 @@ init :: proc(world: ^World) {
 
     // TEST a few randomly positioned bodies
     for i in 0..<200 {
-        asteroid := Body{ position = {rand.float64_range(-7, 7), rand.float64_range(-4, 4), rand.float64_range(-7, 7)} }// -2.0 + 4.0 * (f64(i) / 20.0)} }
+        asteroid := Body{
+            position = {rand.float64_range(-7, 7), rand.float64_range(-4, 4), rand.float64_range(-7, 7)},
+            radius = rand.float32_range(0.5, 2),
+            hue = rand.float32(),
+        }
         append(&world.asteroids, asteroid)
     }
 }

@@ -20,6 +20,8 @@ State :: struct {
 	swapchain:      sg.Swapchain,
 
 	canvas_pv:      Transform,
+	camera_view:    Transform,
+	camera_perspective: Transform,
 	camera_pv:      Transform,
 	camera:         Camera,
 
@@ -96,10 +98,13 @@ Text_Box :: struct {
 
 Particle_Instance :: struct {
     position: Vec3,
+    scale: f32,
+    color: Color,
 }
 
 Particle_Uniforms :: struct {
-    pv: Transform,
+    view: Transform,
+    perspective: Transform,
 }
 
 Solid_Uniforms :: struct {
@@ -281,14 +286,22 @@ step :: proc(state: ^State) {
 	state.camera.rotation = q_roll * q_yaw * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
-	cam_view :=
+	state.camera_view =
 	    linalg.matrix4_translate_f32(state.camera.position) *
 		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
 
+	// cam_view_billboard := matrix[4, 4]f32{
+	//     1, 0, 0, cam_view[0, 3],
+	// 	0, 1, 0, cam_view[1, 3],
+	// 	0, 0, 1, cam_view[2, 3],
+	// 	cam_view[3, 0], cam_view[3, 1], cam_view[3, 2], cam_view[3, 3],
+	// }
+
 	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
-	cam_perspective := linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
-	state.camera_pv = cam_perspective * cam_view
+	state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
+	state.camera_pv = state.camera_perspective * state.camera_view
+	//state.billboard_pv = cam_perspective * cam_view_billboard
 
 	// draw reference cube at world origin
 	sg.apply_pipeline(state.solid_pipeline)
@@ -300,7 +313,8 @@ step :: proc(state: ^State) {
 	// Add asteroids to particle buffer
 	clear(&state.particle_instances)
 	for asteroid in state.world.asteroids {
-	    append(&state.particle_instances, Particle_Instance{position_from_body(asteroid)})
+	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5)
+	    append(&state.particle_instances, Particle_Instance{position_from_body(asteroid), asteroid.radius, tint})
 	}
 	sg.update_buffer(state.particle_buffer, range_from_slice(state.particle_instances[:]))
 
@@ -461,6 +475,8 @@ state_init_particles :: proc(state: ^State) {
             buffers = {0 = {step_func = .PER_INSTANCE}},
             attrs = {
                 0 = {format = .FLOAT3},
+                1 = {format = .FLOAT},
+                2 = {format = .FLOAT4},
             }
         },
         colors = {
@@ -777,7 +793,7 @@ draw_text_box :: proc(state: ^State, fc: ^fs.FontContext, text_box: ^Text_Box, i
 draw_particles :: proc(state: ^State) {
     sg.apply_pipeline(state.particle_pipeline)
     sg.apply_bindings(state.particle_bindings)
-    uniforms := Particle_Uniforms{pv = state.camera_pv}
+    uniforms := Particle_Uniforms{view = state.camera_view, perspective = state.camera_perspective}
     sg.apply_uniforms(0, range_from_type(&uniforms))
     sg.draw(0, 6, len(state.particle_instances))
 }
