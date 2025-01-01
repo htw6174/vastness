@@ -71,7 +71,7 @@ step :: proc "contextless" () {
 	context = ctx
 	free_all(context.temp_allocator)
 
-	sim.step(world)
+	//sim.step(world)
 	view.step(view_state)
 }
 

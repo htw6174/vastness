@@ -26,6 +26,11 @@ State :: struct {
 	camera:         Camera,
 
 	pass_action:    sg.Pass_Action,
+	offscreen_attachments: sg.Attachments,
+	offscreen_format: sg.Pixel_Format,
+	offscreen_image: sg.Image,
+	bloom_action:   sg.Pass_Action,
+	bloom_attachments: sg.Attachments,
 
 	// debug quad
 	debug_bindings: sg.Bindings,
@@ -57,6 +62,10 @@ State :: struct {
 	// solid shapes
 	solid_bindings: sg.Bindings,
 	solid_pipeline: sg.Pipeline,
+
+	// postprocess
+	postprocess_bindings: sg.Bindings,
+	color_correct_pipeline: sg.Pipeline,
 
 	// visualization settings
 	sim_scale: f64 // default should be on the order of 1e-11
@@ -113,6 +122,10 @@ Particle_Uniforms :: struct {
 Solid_Uniforms :: struct {
     pv: Transform,
     m: Transform,
+}
+
+Color_Correct_Uniforms :: struct {
+    exposure: f32,
 }
 
 Camera :: struct {
@@ -184,10 +197,12 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
     	colors = {
             0 = {
           		load_action = .CLEAR,
-          		clear_value = {0, 0, 0, 1},
+          		clear_value = {0, 0, 0, 0},
            	}
         }
 	}
+	// Will use HDR color, so must use a float format
+	state.offscreen_format = .BGRA8
 
 	sg.setup(
 		sg.Desc {
@@ -203,7 +218,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state.swapchain = sg.Swapchain {
 		width = 1280, // TODO: does this need to be the same as the window dimensions at startup?
 		height = 720,
-		// Commented lines get default value from sokol environment, must only assign if different
+		// Some default values from sokol environment, only need to assign if different
 		//sample_count = 1,
 		//color_format = .BGRA8,
 		//depth_format = .DEPTH_STENCIL,
@@ -217,6 +232,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state_init_debug(state)
 	state_init_particles(state)
 	state_init_solids(state)
+	state_init_postprocess(state)
 
 	// Construct some sample text boxes
 	entry_box := Text_Box {
@@ -253,6 +269,27 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	}
 
 	state.text_boxes[2] = matrix_box
+
+	// Offscreen pass setup
+	state.offscreen_image = sg.make_image(sg.Image_Desc{
+		render_target = true,
+		width = 1280,
+		height = 720,
+		pixel_format = state.offscreen_format,
+	})
+	// TODO: must keep reference to dispose and re-create when screen size changes
+	offscreen_depth := sg.make_image(sg.Image_Desc{
+		render_target = true,
+		width = 1280,
+		height = 720,
+		pixel_format = .DEPTH,
+	})
+	state.offscreen_attachments = sg.make_attachments({
+	    colors = {0 = {
+			image = state.offscreen_image,
+		}},
+		depth_stencil = {image = offscreen_depth},
+	})
 }
 
 step :: proc(state: ^State) {
@@ -269,8 +306,6 @@ step :: proc(state: ^State) {
 
     platform.poll_events(handle_event, state)
     handle_input_state(state)
-
-	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
 
 	width, height := platform.get_render_bounds()
 	canvas_view := linalg.MATRIX4F32_IDENTITY // TODO?
@@ -310,12 +345,11 @@ step :: proc(state: ^State) {
 	state.camera_pv = state.camera_perspective * state.camera_view
 	//state.billboard_pv = cam_perspective * cam_view_billboard
 
-	// draw reference cube at world origin
-	sg.apply_pipeline(state.solid_pipeline)
-	sg.apply_bindings(state.solid_bindings)
-	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
-	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
-	sg.draw(0, 36, 1)
+	// Offscreen pass, will have post-processing applied later
+	sg.begin_pass(sg.Pass{
+	    action = state.pass_action,
+		attachments = state.offscreen_attachments,
+	})
 
 	// Add asteroids to particle buffer
 	clear(&state.particle_instances)
@@ -327,6 +361,32 @@ step :: proc(state: ^State) {
 
 	draw_particles(state)
 
+	sg.end_pass()
+
+	// Bloom passes
+	// sg.begin_pass(sg.Pass{
+	//     action = state.bloom_action,
+	// 	attachments = state.bloom_attachments,
+	// })
+
+	// // TODO: bloom
+
+	// sg.end_pass()
+
+	// Default pass
+	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
+
+	// draw reference cube at world origin
+	sg.apply_pipeline(state.solid_pipeline)
+	sg.apply_bindings(state.solid_bindings)
+	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
+	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
+	sg.draw(0, 36, 1)
+
+	// draw final output of post-processing stack
+	draw_postprocess(state)
+
+	// draw 2D UI over everything else
 	draw_ui(state)
 
 	// update matrix text box
@@ -343,6 +403,7 @@ step :: proc(state: ^State) {
 	// sg.draw(0, 6, 1)
 
 	sg.end_pass()
+
 	sg.commit()
 	state.frame += 1
 }
@@ -488,6 +549,7 @@ state_init_particles :: proc(state: ^State) {
         },
         colors = {
             0 = {
+                pixel_format = state.offscreen_format,
                 blend = {
                     enabled = true,
                     src_factor_rgb = .SRC_ALPHA,
@@ -501,7 +563,7 @@ state_init_particles :: proc(state: ^State) {
         depth = {
             write_enabled = false,
             compare = .LESS_EQUAL,
-        }
+        },
     })
 }
 
@@ -527,50 +589,50 @@ state_init_debug :: proc(state: ^State) {
 	}
 
 	debug_shader := sg.make_shader(
-			sg.Shader_Desc {
-				vertex_func = {source = #load(ASSET_DIR + "debug/vert.wgsl", cstring)},
-				fragment_func = {source = #load(ASSET_DIR + "debug/frag.wgsl", cstring)},
-				uniform_blocks = {
-					// 0 = {
-					// 	stage = .VERTEX,
-					// 	size = size_of(Transform),
-					// 	wgsl_group0_binding_n = 0,
-					// 	layout = .NATIVE,
-					// },
-				},
-				images = {
-					0 = {
-						stage = .FRAGMENT,
-						image_type = ._2D,
-						sample_type = .FLOAT,
-						wgsl_group1_binding_n = 1,
-					},
-				},
-				samplers = {
-					0 = {stage = .FRAGMENT, sampler_type = .FILTERING, wgsl_group1_binding_n = 0},
-				},
-				image_sampler_pairs = {0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0}},
+		sg.Shader_Desc {
+			vertex_func = {source = #load(ASSET_DIR + "debug/vert.wgsl", cstring)},
+			fragment_func = {source = #load(ASSET_DIR + "debug/frag.wgsl", cstring)},
+			uniform_blocks = {
+				// 0 = {
+				// 	stage = .VERTEX,
+				// 	size = size_of(Transform),
+				// 	wgsl_group0_binding_n = 0,
+				// 	layout = .NATIVE,
+				// },
 			},
-		)
+			images = {
+				0 = {
+					stage = .FRAGMENT,
+					image_type = ._2D,
+					sample_type = .FLOAT,
+					wgsl_group1_binding_n = 1,
+				},
+			},
+			samplers = {
+				0 = {stage = .FRAGMENT, sampler_type = .FILTERING, wgsl_group1_binding_n = 0},
+			},
+			image_sampler_pairs = {0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0}},
+		},
+	)
 
-		state.debug_pipeline = sg.make_pipeline(
-			sg.Pipeline_Desc {
-				shader = debug_shader,
-				colors = {
-					0 = {
-						blend = {
-							enabled = true,
-							src_factor_rgb = .SRC_ALPHA,
-							dst_factor_rgb = .ONE_MINUS_SRC_ALPHA,
-							src_factor_alpha = .SRC_ALPHA,
-							dst_factor_alpha = .ONE_MINUS_SRC_ALPHA,
-						},
+	state.debug_pipeline = sg.make_pipeline(
+		sg.Pipeline_Desc {
+			shader = debug_shader,
+			colors = {
+				0 = {
+					blend = {
+						enabled = true,
+						src_factor_rgb = .SRC_ALPHA,
+						dst_factor_rgb = .ONE_MINUS_SRC_ALPHA,
+						src_factor_alpha = .SRC_ALPHA,
+						dst_factor_alpha = .ONE_MINUS_SRC_ALPHA,
 					},
 				},
-				primitive_type = .TRIANGLES, // same as default
-				index_type = .UINT32,
 			},
-		)
+			primitive_type = .TRIANGLES, // same as default
+			index_type = .UINT32,
+		},
+	)
 }
 
 state_init_font :: proc(state: ^State) {
@@ -693,6 +755,87 @@ state_init_font :: proc(state: ^State) {
 	)
 }
 
+state_init_postprocess :: proc(state: ^State) {
+   pp_sampler := sg.make_sampler(
+		sg.Sampler_Desc {
+			min_filter = .LINEAR,
+			mag_filter = .LINEAR,
+			mipmap_filter = .LINEAR,
+			wrap_u = .CLAMP_TO_EDGE,
+			wrap_v = .CLAMP_TO_EDGE,
+			wrap_w = .CLAMP_TO_EDGE,
+			min_lod = 0,
+			max_lod = 32,
+			max_anisotropy = 1,
+		},
+	)
+	state.postprocess_bindings = {
+		index_buffer = shapes.quad_index_buffer,
+		images = {0 = {}}, // Must bind image later based on post-process stack
+		samplers = {0 = pp_sampler},
+	}
+
+	// Bloom setup
+	state.bloom_action = {
+	    colors = {
+			0 = {
+			    load_action = .DONTCARE,
+			}
+		}
+	}
+	bloom_image := sg.make_image(sg.Image_Desc{
+		render_target = true,
+		width = 1280,
+		height = 720,
+		num_mipmaps = 1, // TODO: change to match number of bloom passes
+		pixel_format = state.offscreen_format,
+	})
+	state.bloom_attachments = sg.make_attachments({
+	    colors = {0 = {
+			image = bloom_image,
+			mip_level = 0,
+		}}
+	})
+	// TODO: shader + pipeline
+
+	// color correction setup
+	// For now, only used in final pass so no need to setup an action or render attachment
+	color_correct_shader := sg.make_shader(
+		sg.Shader_Desc {
+			vertex_func = {source = #load(ASSET_DIR + "postprocess/vert.wgsl", cstring)},
+			fragment_func = {source = #load(ASSET_DIR + "postprocess/color_correct.wgsl", cstring)},
+			uniform_blocks = {
+				0 = {
+					stage = .FRAGMENT,
+					size = size_of(Color_Correct_Uniforms),
+					wgsl_group0_binding_n = 0,
+					layout = .NATIVE,
+				},
+			},
+			images = {
+				0 = {
+					stage = .FRAGMENT,
+					image_type = ._2D,
+					sample_type = .FLOAT,
+					wgsl_group1_binding_n = 1,
+				},
+			},
+			samplers = {
+				0 = {stage = .FRAGMENT, sampler_type = .FILTERING, wgsl_group1_binding_n = 0},
+			},
+			image_sampler_pairs = {0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0}},
+		},
+	)
+
+	state.color_correct_pipeline = sg.make_pipeline(
+		sg.Pipeline_Desc {
+			shader = color_correct_shader,
+			primitive_type = .TRIANGLES, // same as default
+			index_type = .UINT32,
+		},
+	)
+}
+
 draw_ui :: proc(state: ^State) {
 
 	fc := &state.font_context
@@ -803,6 +946,15 @@ draw_particles :: proc(state: ^State) {
     uniforms := Particle_Uniforms{view = state.camera_view, perspective = state.camera_perspective}
     sg.apply_uniforms(0, range_from_type(&uniforms))
     sg.draw(0, 6, len(state.particle_instances))
+}
+
+draw_postprocess :: proc(state: ^State) {
+    sg.apply_pipeline(state.color_correct_pipeline)
+    state.postprocess_bindings.images[0] = state.offscreen_image
+    sg.apply_bindings(state.postprocess_bindings)
+    uniforms := Color_Correct_Uniforms{exposure = math.sin(f32(state.frame) / 60.0) + 1.0}
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
 }
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
