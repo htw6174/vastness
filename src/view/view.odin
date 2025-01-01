@@ -202,7 +202,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
         }
 	}
 	// Will use HDR color, so must use a float format
-	state.offscreen_format = .BGRA8
+	state.offscreen_format = .RGBA16F
 
 	sg.setup(
 		sg.Desc {
@@ -332,20 +332,12 @@ step :: proc(state: ^State) {
 	    linalg.matrix4_translate_f32(state.camera.position) *
 		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
 
-	// cam_view_billboard := matrix[4, 4]f32{
-	//     1, 0, 0, cam_view[0, 3],
-	// 	0, 1, 0, cam_view[1, 3],
-	// 	0, 0, 1, cam_view[2, 3],
-	// 	cam_view[3, 0], cam_view[3, 1], cam_view[3, 2], cam_view[3, 3],
-	// }
-
 	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
 	state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
 	state.camera_pv = state.camera_perspective * state.camera_view
-	//state.billboard_pv = cam_perspective * cam_view_billboard
 
-	// Offscreen pass, will have post-processing applied later
+	// Offscreen pass, anything drawn here will have post-processing applied later
 	sg.begin_pass(sg.Pass{
 	    action = state.pass_action,
 		attachments = state.offscreen_attachments,
@@ -377,6 +369,8 @@ step :: proc(state: ^State) {
 	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
 
 	// draw reference cube at world origin
+	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
+	// Solution might involve stencil buffer
 	sg.apply_pipeline(state.solid_pipeline)
 	sg.apply_bindings(state.solid_bindings)
 	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
@@ -553,9 +547,9 @@ state_init_particles :: proc(state: ^State) {
                 blend = {
                     enabled = true,
                     src_factor_rgb = .SRC_ALPHA,
-                    dst_factor_rgb = .ONE_MINUS_SRC_ALPHA,
-					src_factor_alpha = .SRC_ALPHA,
-					dst_factor_alpha = .ONE_MINUS_SRC_ALPHA,
+                    dst_factor_rgb = .ONE,
+					src_factor_alpha = .ONE,
+					dst_factor_alpha = .ZERO,
                 }
             }
         },
@@ -952,7 +946,7 @@ draw_postprocess :: proc(state: ^State) {
     sg.apply_pipeline(state.color_correct_pipeline)
     state.postprocess_bindings.images[0] = state.offscreen_image
     sg.apply_bindings(state.postprocess_bindings)
-    uniforms := Color_Correct_Uniforms{exposure = math.sin(f32(state.frame) / 60.0) + 1.0}
+    uniforms := Color_Correct_Uniforms{exposure = 1.0}//math.sin(f32(state.frame) / 60.0) * 0.5 + 0.5}
     sg.apply_uniforms(0, range_from_type(&uniforms))
     sg.draw(0, 6, 1)
 }
