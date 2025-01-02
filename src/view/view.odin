@@ -54,6 +54,12 @@ State :: struct {
 	text_boxes: [10]Text_Box,
 	focused_text: int,
 
+	// points
+	point_bindings: sg.Bindings,
+	point_pipeline: sg.Pipeline,
+	point_instances: [dynamic]Point_Instance, // TODO: change name from instances? not used in an instanced draw, points correspond to verts
+	point_buffer: sg.Buffer,
+
 	// particles
 	particle_bindings: sg.Bindings,
 	particle_pipeline: sg.Pipeline,
@@ -122,6 +128,11 @@ Text_Box :: struct {
     uniforms: Text_Uniforms,
 }
 
+Point_Instance :: struct {
+    position: Vec3,
+    color: Color,
+}
+
 Particle_Instance :: struct {
     position: Vec3,
     scale: f32,
@@ -169,6 +180,7 @@ MAX_FONT_INSTANCES :: 1024 * 16
 MAX_FONT_PAGE_INSTANCES :: 1024
 
 MAX_PARTICLE_INSTANCES :: 1024 * 8
+MAX_POINTS :: 1024 * 8
 
 // TODO: embed in view state
 shapes: Shapes
@@ -254,6 +266,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state_init_offscreen(state)
 	state_init_font(state)
 	state_init_debug(state)
+	state_init_points(state)
 	state_init_particles(state)
 	state_init_solids(state)
 	state_init_postprocess(state)
@@ -269,10 +282,10 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 			av = .TOP,
 		},
 		color = {1, 1, 1, 1},
-		rect = {5, 5, 400, 280},
+		rect = {5, 5, 400, 600},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "Move camera with esdftg\nRotate with qawrcv\nChange scale with zx\nPress ` to make this\ntext box active. >>>")
+	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move camera\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle bloom\nSpace: play/pause\nPress ` to make this\ntext box active. >>>")
 	state.text_boxes[0] = entry_box
 
     matrix_box := Text_Box {
@@ -337,6 +350,7 @@ step :: proc(state: ^State) {
 
 	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
+	// TODO: document handedness, clip space z range and reverse z; add options for each config
 	state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
 	state.camera_pv = state.camera_perspective * state.camera_view
 
@@ -346,15 +360,20 @@ step :: proc(state: ^State) {
 		attachments = state.offscreen_attachments_depth,
 	})
 
-	// Add asteroids to particle buffer
-	clear(&state.particle_instances)
+	// Add asteroids to point buffer
+	// TODO: use real body size as radius
+	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
+	clear(&state.point_instances)
 	for asteroid in state.world.asteroids {
-	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5)
-	    append(&state.particle_instances, Particle_Instance{position_from_body(asteroid, state.sim_scale), asteroid.radius, tint})
+	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5) * asteroid.radius
+	    append(&state.point_instances, Point_Instance{position_from_body(asteroid, state.sim_scale), tint})
 	}
-	sg.update_buffer(state.particle_buffer, range_from_slice(state.particle_instances[:]))
+	sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
 
-	draw_particles(state)
+	draw_points(state)
+
+	// TODO: use particles pipeline for larger bodies, maybe skip bloom pass
+	//draw_particles(state)
 
 	sg.end_pass()
 	state.offscreen_source_index = 0
@@ -538,6 +557,60 @@ state_init_solids :: proc(state: ^State) {
             write_enabled = true,
             compare = .LESS_EQUAL,
         }
+    })
+}
+
+state_init_points :: proc(state: ^State) {
+    state.point_instances = make([dynamic]Point_Instance, 0, MAX_POINTS)
+
+    point_instance_buffer := sg.make_buffer({
+        type = .VERTEXBUFFER,
+        usage = .DYNAMIC,
+        size = size_of(Point_Instance) * MAX_POINTS,
+    })
+    state.point_buffer = point_instance_buffer
+    state.point_bindings = {
+        vertex_buffers = {0 = point_instance_buffer},
+    }
+
+    point_shader := sg.make_shader({
+        vertex_func = {source = #load(ASSET_DIR + "point/vert.wgsl", cstring)},
+        fragment_func = {source = #load(ASSET_DIR + "point/frag.wgsl", cstring)},
+        uniform_blocks = {
+            0 = {
+                stage = .VERTEX,
+                size = size_of(Particle_Uniforms), // TODO: do points need their own uniform struct?
+                wgsl_group0_binding_n = 0,
+                layout = .NATIVE,
+            }
+        }
+    })
+
+    state.point_pipeline = sg.make_pipeline({
+        shader = point_shader,
+        layout = {
+            attrs = {
+                0 = {format = .FLOAT3},
+                1 = {format = .FLOAT4},
+            }
+        },
+        colors = {
+            0 = {
+                pixel_format = state.offscreen_format,
+                blend = {
+                    enabled = true,
+                    src_factor_rgb = .SRC_ALPHA,
+                    dst_factor_rgb = .ONE,
+    					src_factor_alpha = .ONE,
+    					dst_factor_alpha = .ZERO,
+                }
+            }
+        },
+        primitive_type = .POINTS,
+        depth = {
+            write_enabled = false,
+            compare = .LESS_EQUAL,
+        },
     })
 }
 
@@ -1024,6 +1097,14 @@ draw_text_box :: proc(state: ^State, fc: ^fs.FontContext, text_box: ^Text_Box, i
 	sg.draw(0, 6, text_box.instance_count)
 
 	return instance_buffer[text_box.instance_count:]
+}
+
+draw_points :: proc(state: ^State) {
+    sg.apply_pipeline(state.point_pipeline)
+    sg.apply_bindings(state.point_bindings)
+    uniforms := Particle_Uniforms{view = state.camera_view, perspective = state.camera_perspective}
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, len(state.point_instances), 1)
 }
 
 draw_particles :: proc(state: ^State) {

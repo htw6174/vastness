@@ -29,7 +29,7 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     // instance position to view space
     let v_pos = uni.v * vec4<f32>(inst.position, 1);
     // 1x1 * scale quad in view space
-    let corner = vec3<f32>((uv - 0.5) * inst.scale, 0) + v_pos.xyz;
+    let corner = vec3<f32>((uv - 0.5) * inst.scale * 0.01, 0) + v_pos.xyz;
 
     let pos = uni.p * vec4<f32>(corner, 1);
     output.position = pos;
