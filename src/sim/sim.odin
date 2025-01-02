@@ -22,7 +22,7 @@ Body :: struct {
     position: Position,
     velocity: Velocity,
     mass: Kilograms,
-    radius: f64,
+    radius: Meters,
     hue: f32,
 }
 
@@ -60,24 +60,30 @@ init :: proc(world: ^World) {
     // sun
     append(&world.bodies, Body{
         mass = 1.989e30,
-        radius = 3,
+        radius = 139.3e6,
         hue = 0.2,
     })
     earth := body_from_orbit(149.596e9, 29.78e3, 0)
     earth.mass = 5.9724e24
-    earth.radius = 2
+    earth.radius = 6.371e6
     earth.hue = 0.5
     append(&world.bodies, earth)
     mars := body_from_orbit(227.923e9, 24.07e3, 0)
     mars.mass = 0.64171e24
-    mars.radius = 1.5
+    mars.radius = 3.389e6
     mars.hue = 0
     append(&world.bodies, mars)
+    jupiter := body_from_orbit(778.570e9, 13.0e3, 0)
+    jupiter.mass = 1898.19e24
+    jupiter.radius = 69.911e6
+    jupiter.hue = 0.1
+    append(&world.bodies, jupiter)
 
     world.massive_bodies = len(world.bodies)
 
     min_r, max_r := 149.596e9 * 0.5, 227.923e9 * 2.0
     min_v, max_v := 24.07e3   * 0.5, 29.78e3   * 2.0
+    min_d, max_d := 10.0, 1000.0 // size of asteroids
     max_elevation := 100000.0
     for i in 0..<4096 {
         interp := rand.float64() // random orbit distance between earth and mars

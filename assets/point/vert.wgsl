@@ -25,6 +25,6 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     let c1 = uni.p * p1;
     let scale = (c1.x / c1.w) - (c_pos.x / c_pos.w);
     output.position = c_pos;
-    output.tint     = vec4<f32>(inst.color.rgb * scale * 100.0, inst.color.a); // TODO: scale color intensity by nearness?
+    output.tint     = vec4<f32>(inst.color.rgb * scale * 10000.0, inst.color.a); // TODO: scale color intensity by nearness?
     return output;
 }

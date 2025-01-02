@@ -192,15 +192,15 @@ init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
 
 	state.camera = {
-	    position = {0, 0, -10},
-		rotation = linalg.QUATERNIONF32_IDENTITY,
+	    position = {0, 0, -100},
 	    near_clip = 0.1,
 		far_clip = 1000,
 		fov = math.PI / 4.0,
 	}
+	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 6.0, {1, 0, 0}) * linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 
-	state.sim_scale = 1e-11
-	state.bloom_enabled = true
+	state.sim_scale = 1e-10
+	state.bloom_enabled = false
 
 	// input setup
 	register_keybind({.RETURN, .PRESS, input_newline})
@@ -220,7 +220,9 @@ init :: proc(state: ^State) {
 	register_keybind({.Z, .HOLD, zoom_in})
 	register_keybind({.X, .HOLD, zoom_out})
 	register_keybind({.B, .PRESS, toggle_bloom})
-	register_keybind({.SPACE, .PRESS, toggle_play})
+	register_keybind({.SPACE, .PRESS, sim_toggle_play})
+	register_keybind({.LEFTBRACKET, .PRESS, sim_decrease_speed})
+	register_keybind({.RIGHTBRACKET, .PRESS, sim_increase_speed})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
@@ -235,8 +237,9 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
            	}
         }
 	}
-	state.width = 1280
-	state.height = 720
+	uw, uh := platform.get_render_bounds()
+	state.width = c.int(uw)
+	state.height = c.int(uh)
 	// Will use HDR color, so must use a float format
 	state.offscreen_format = .RGBA16F
 
@@ -282,10 +285,10 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 			av = .TOP,
 		},
 		color = {1, 1, 1, 1},
-		rect = {5, 5, 400, 600},
+		rect = {5, 5, 400, 440},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move camera\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle bloom\nSpace: play/pause\nPress ` to make this\ntext box active. >>>")
+	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move camera\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle blur\nSpace: play/pause\n[/]: Change sim speed\nPress ` to make this\ntext box active.\nTry entering a few lines!")
 	state.text_boxes[0] = entry_box
 
     matrix_box := Text_Box {
@@ -329,7 +332,7 @@ step :: proc(state: ^State) {
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 	state.canvas_pv = canvas_perspective * canvas_view
 
-	move_speed: f32 = 4.0
+	move_speed: f32 = 40.0
 	rotate_speed: f32 = 1.0
 	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
 	state.camera.position += state.camera.velocity * move_speed * dT
@@ -345,13 +348,14 @@ step :: proc(state: ^State) {
 	state.camera.angular_velocity = 0
 
 	state.camera_view =
-	    linalg.matrix4_translate_f32(state.camera.position) *
+	    linalg.matrix4_translate_f32(-state.camera.position) *
 		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
 
 	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
-	// NOTE: there is also mat4_perspective_infinite, might make more sense for a space game?
 	// TODO: document handedness, clip space z range and reverse z; add options for each config
-	state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = true)
+	state.camera_perspective = linalg.matrix4_infinite_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, flip_z_axis = false)
+	// NOTE: Any reason not to use an infinite far clip?
+	//state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = false)
 	state.camera_pv = state.camera_perspective * state.camera_view
 
 	// Offscreen pass, anything drawn here will have post-processing applied later
@@ -363,18 +367,28 @@ step :: proc(state: ^State) {
 	// Add asteroids to point buffer
 	// TODO: use real body size as radius
 	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
+	radius_scale_bias := 1.0e3
 	clear(&state.point_instances)
-	for body in state.world.bodies {
+	clear(&state.particle_instances)
+	for body, i in state.world.bodies {
 	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, 1, 0.5)
-		tint.rgb *= f32(body.radius) // TODO: should scale radius before using
-	    append(&state.point_instances, Point_Instance{position_from_body(body, state.sim_scale), tint})
+		r_apparant := state.sim_scale * radius_scale_bias * body.radius
+		if i <= state.world.massive_bodies { // particle
+		    append(&state.particle_instances, Particle_Instance{position_from_body(body, state.sim_scale), f32(r_apparant), tint})
+		} else { // point
+		    //tint.rgb *= f32(r_apparant)
+	        append(&state.point_instances, Point_Instance{position_from_body(body, state.sim_scale), tint})
+		}
 	}
-	sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
+	if len(state.point_instances) > 0 {
+	    sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
+	}
+	if len(state.particle_instances) > 0 {
+	    sg.update_buffer(state.particle_buffer, range_from_slice(state.particle_instances[:]))
+	}
 
 	draw_points(state)
-
-	// TODO: use particles pipeline for larger bodies, maybe skip bloom pass
-	//draw_particles(state)
+	draw_particles(state)
 
 	sg.end_pass()
 	state.offscreen_source_index = 0
@@ -399,15 +413,15 @@ step :: proc(state: ^State) {
 	// sg.draw(0, 36, 1)
 
 	// draw 2D UI over everything else
-	//draw_ui(state)
+	draw_ui(state)
 
 	// update matrix text box
-	state.text_boxes[2].rect.x = f32(width) - 40
-	if state.frame % 8 == 0 {
-		if strings.builder_len(state.text_boxes[2].text) > 1024 do strings.builder_reset(&state.text_boxes[2].text)
-	    rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
-	    strings.write_byte(&state.text_boxes[2].text, rand_byte)
-	}
+	// state.text_boxes[2].rect.x = f32(width) - 40
+	// if state.frame % 8 == 0 {
+	// 	if strings.builder_len(state.text_boxes[2].text) > 1024 do strings.builder_reset(&state.text_boxes[2].text)
+	//     rand_byte := u8(int('0') + rand.int_max(int('~') - int('0')))
+	//     strings.write_byte(&state.text_boxes[2].text, rand_byte)
+	// }
 
 	// draw debug quad over top-right corner
 	// sg.apply_pipeline(state.debug_pipeline)
@@ -1257,8 +1271,16 @@ toggle_bloom :: proc(state: ^State) {
     state.bloom_enabled = !state.bloom_enabled
 }
 
-toggle_play :: proc(state: ^State) {
+sim_toggle_play :: proc(state: ^State) {
     state.world.is_running = !state.world.is_running
+}
+
+sim_increase_speed :: proc(state: ^State) {
+    state.world.time_step *= 2
+}
+
+sim_decrease_speed :: proc(state: ^State) {
+    state.world.time_step /= 2
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
