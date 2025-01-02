@@ -14,6 +14,8 @@ import "../sim"
 
 ASSET_DIR :: "../../assets/"
 
+BLOOM_LEVELS :: 2
+
 State :: struct {
 	frame:          u64,
 	world:          ^sim.World,
@@ -30,7 +32,8 @@ State :: struct {
 	offscreen_format: sg.Pixel_Format,
 	offscreen_image: sg.Image,
 	bloom_action:   sg.Pass_Action,
-	bloom_attachments: sg.Attachments,
+	bloom_attachments: [2][BLOOM_LEVELS]sg.Attachments, // [image][mipmap]
+	bloom_images: [2]sg.Image,
 
 	// debug quad
 	debug_bindings: sg.Bindings,
@@ -65,6 +68,8 @@ State :: struct {
 
 	// postprocess
 	postprocess_bindings: sg.Bindings,
+	bloom_down_pipeline: sg.Pipeline,
+	bloom_up_pipeline: sg.Pipeline,
 	color_correct_pipeline: sg.Pipeline,
 
 	// visualization settings
@@ -122,6 +127,11 @@ Particle_Uniforms :: struct {
 Solid_Uniforms :: struct {
     pv: Transform,
     m: Transform,
+}
+
+Bloom_Uniforms :: struct {
+    level: f32, // mip level of render texture to use as input
+    strength: f32,
 }
 
 Color_Correct_Uniforms :: struct {
@@ -355,33 +365,25 @@ step :: proc(state: ^State) {
 
 	sg.end_pass()
 
-	// Bloom passes
-	// sg.begin_pass(sg.Pass{
-	//     action = state.bloom_action,
-	// 	attachments = state.bloom_attachments,
-	// })
-
-	// // TODO: bloom
-
-	// sg.end_pass()
+	postprocess_bloom(state)
 
 	// Default pass
 	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
 
-	// draw reference cube at world origin
-	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
-	// Solution might involve stencil buffer
-	sg.apply_pipeline(state.solid_pipeline)
-	sg.apply_bindings(state.solid_bindings)
-	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
-	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
-	sg.draw(0, 36, 1)
-
 	// draw final output of post-processing stack
 	draw_postprocess(state)
 
+	// draw reference cube at world origin
+	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
+	// Solution might involve stencil buffer
+	// sg.apply_pipeline(state.solid_pipeline)
+	// sg.apply_bindings(state.solid_bindings)
+	// cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
+	// sg.apply_uniforms(0, range_from_type(&cube_uniforms))
+	// sg.draw(0, 36, 1)
+
 	// draw 2D UI over everything else
-	draw_ui(state)
+	//draw_ui(state)
 
 	// update matrix text box
 	state.text_boxes[2].rect.x = f32(width) - 40
@@ -773,24 +775,109 @@ state_init_postprocess :: proc(state: ^State) {
 	state.bloom_action = {
 	    colors = {
 			0 = {
-			    load_action = .DONTCARE,
+			    load_action = .LOAD,
 			}
 		}
 	}
-	bloom_image := sg.make_image(sg.Image_Desc{
+	// A single image can't be used as both a source and render target in the same pass, so must make 2 and swap between them
+	state.bloom_images[0] = sg.make_image(sg.Image_Desc{
 		render_target = true,
-		width = 1280,
-		height = 720,
-		num_mipmaps = 1, // TODO: change to match number of bloom passes
+		width = 640,
+		height = 360,
+		num_mipmaps = BLOOM_LEVELS,
 		pixel_format = state.offscreen_format,
 	})
-	state.bloom_attachments = sg.make_attachments({
-	    colors = {0 = {
-			image = bloom_image,
-			mip_level = 0,
-		}}
+	state.bloom_images[1] = sg.make_image(sg.Image_Desc{
+		render_target = true,
+		width = 640,
+		height = 360,
+		num_mipmaps = BLOOM_LEVELS,
+		pixel_format = state.offscreen_format,
 	})
-	// TODO: shader + pipeline
+	for i in 0..<BLOOM_LEVELS {
+    	state.bloom_attachments[0][i] = sg.make_attachments({
+    	    colors = {0 = {
+    			image = state.bloom_images[0],
+    			mip_level = i32(i),
+    		}}
+    	})
+    	state.bloom_attachments[1][i] = sg.make_attachments({
+       	    colors = {0 = {
+     			image = state.bloom_images[1],
+     			mip_level = i32(i),
+      		}}
+       	})
+	}
+	bloom_down_shader := sg.make_shader(sg.Shader_Desc{
+	    vertex_func = {source = #load(ASSET_DIR + "postprocess/vert.wgsl", cstring)},
+		fragment_func = {source = #load(ASSET_DIR + "postprocess/bloom_down.wgsl", cstring)},
+		uniform_blocks = {
+			0 = {
+				stage = .FRAGMENT,
+				size = size_of(Bloom_Uniforms),
+				wgsl_group0_binding_n = 0,
+				layout = .NATIVE,
+			},
+		},
+		images = {
+			0 = {
+				stage = .FRAGMENT,
+				image_type = ._2D,
+				sample_type = .FLOAT,
+				wgsl_group1_binding_n = 1,
+			},
+		},
+		samplers = {
+			0 = {stage = .FRAGMENT, sampler_type = .FILTERING, wgsl_group1_binding_n = 0},
+		},
+		image_sampler_pairs = {0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0}},
+	})
+	state.bloom_down_pipeline = sg.make_pipeline(sg.Pipeline_Desc{
+	    shader = bloom_down_shader,
+		colors = {0 = {pixel_format = state.offscreen_format}},
+		depth = {
+		    pixel_format = .NONE,
+			write_enabled = false,
+		},
+		primitive_type = .TRIANGLES, // same as default
+		index_type = .UINT32,
+	})
+	bloom_up_shader := sg.make_shader(sg.Shader_Desc{
+	    vertex_func = {source = #load(ASSET_DIR + "postprocess/vert.wgsl", cstring)},
+		fragment_func = {source = #load(ASSET_DIR + "postprocess/bloom_up.wgsl", cstring)},
+		uniform_blocks = {
+			0 = {
+				stage = .FRAGMENT,
+				size = size_of(Bloom_Uniforms),
+				wgsl_group0_binding_n = 0,
+				layout = .NATIVE,
+			},
+		},
+		images = {
+			0 = {
+				stage = .FRAGMENT,
+				image_type = ._2D,
+				sample_type = .FLOAT,
+				wgsl_group1_binding_n = 1,
+			},
+		},
+		samplers = {
+			0 = {stage = .FRAGMENT, sampler_type = .FILTERING, wgsl_group1_binding_n = 0},
+		},
+		image_sampler_pairs = {
+		    0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0},
+		},
+	})
+	state.bloom_up_pipeline = sg.make_pipeline(sg.Pipeline_Desc{
+	    shader = bloom_up_shader,
+		colors = {0 = {pixel_format = state.offscreen_format}},
+		depth = {
+		    pixel_format = .NONE,
+			write_enabled = false,
+		},
+		primitive_type = .TRIANGLES, // same as default
+		index_type = .UINT32,
+	})
 
 	// color correction setup
 	// For now, only used in final pass so no need to setup an action or render attachment
@@ -820,7 +907,6 @@ state_init_postprocess :: proc(state: ^State) {
 			image_sampler_pairs = {0 = {stage = .FRAGMENT, image_slot = 0, sampler_slot = 0}},
 		},
 	)
-
 	state.color_correct_pipeline = sg.make_pipeline(
 		sg.Pipeline_Desc {
 			shader = color_correct_shader,
@@ -942,9 +1028,85 @@ draw_particles :: proc(state: ^State) {
     sg.draw(0, 6, len(state.particle_instances))
 }
 
+postprocess_bloom :: proc(state: ^State) {
+	// Bloom passes
+	// Use offscreen render for first pass
+	// TODO is there an intermediate pass that makes sense to do first so this can be re-ordered more easily, offscreen -> ? -> bloom?
+	state.postprocess_bindings.images[0] = state.offscreen_image
+	uniforms := Bloom_Uniforms{strength = 1.0}
+
+	sg.begin_pass(sg.Pass{
+   	    action = state.bloom_action,
+  		attachments = state.bloom_attachments[0][0],
+   	})
+    sg.apply_pipeline(state.bloom_down_pipeline)
+    sg.apply_bindings(state.postprocess_bindings)
+    uniforms.level = f32(0)
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+    sg.end_pass()
+
+    state.postprocess_bindings.images[0] = state.bloom_images[0]
+
+	sg.begin_pass(sg.Pass{
+   	    action = state.bloom_action,
+  		attachments = state.bloom_attachments[1][1],
+   	})
+    sg.apply_pipeline(state.bloom_down_pipeline)
+    sg.apply_bindings(state.postprocess_bindings)
+    uniforms.level = f32(0)
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+    sg.end_pass()
+
+    state.postprocess_bindings.images[0] = state.bloom_images[1]
+
+	sg.begin_pass(sg.Pass{
+   	    action = state.bloom_action,
+  		attachments = state.bloom_attachments[0][0],
+   	})
+    sg.apply_pipeline(state.bloom_up_pipeline)
+    sg.apply_bindings(state.postprocess_bindings)
+    uniforms.level = f32(1)
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+    sg.end_pass()
+
+    // // DOWNSCALE
+    // for i in 0..<BLOOM_LEVELS {
+    //     sg.begin_pass(sg.Pass{
+    // 	    action = state.bloom_action,
+    // 		attachments = state.bloom_attachments[i],
+    // 	})
+    //     sg.apply_pipeline(state.bloom_down_pipeline)
+    //     sg.apply_bindings(state.postprocess_bindings)
+    //     uniforms.level = f32(i)
+    //     sg.apply_uniforms(0, range_from_type(&uniforms))
+    //     sg.draw(0, 6, 1)
+    //     sg.end_pass()
+    //     state.postprocess_bindings.images[0] = state.bloom_images[i % 2]
+    // }
+
+    // // UPSCALE
+    // for i in 0..<BLOOM_LEVELS {
+    //     sg.begin_pass(sg.Pass{
+    // 	    action = state.bloom_action,
+    // 		attachments = state.bloom_attachments[i],
+    // 	})
+    //     sg.apply_pipeline(state.bloom_up_pipeline)
+    //     sg.apply_bindings(state.postprocess_bindings)
+    //     uniforms.level = f32(BLOOM_LEVELS - i)
+    //     sg.apply_uniforms(0, range_from_type(&uniforms))
+    //     sg.draw(0, 6, 1)
+    //     sg.end_pass()
+    //     state.postprocess_bindings.images[0] = state.bloom_images[(i) % 2]
+    // }
+
+}
+
 draw_postprocess :: proc(state: ^State) {
     sg.apply_pipeline(state.color_correct_pipeline)
-    state.postprocess_bindings.images[0] = state.offscreen_image
+    state.postprocess_bindings.images[0] = state.bloom_images[0]
     sg.apply_bindings(state.postprocess_bindings)
     uniforms := Color_Correct_Uniforms{exposure = 1.0}//math.sin(f32(state.frame) / 60.0) * 0.5 + 0.5}
     sg.apply_uniforms(0, range_from_type(&uniforms))

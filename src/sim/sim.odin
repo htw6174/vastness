@@ -43,7 +43,7 @@ Acceleration :: [3]f64
 Kilograms :: f64
 
 init :: proc(world: ^World) {
-    world.time_step = 86400
+    world.time_step = 43200
 
     world.sun = Body {
         mass = 1.989e30,
