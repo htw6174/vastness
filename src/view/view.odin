@@ -14,8 +14,9 @@ import "../sim"
 
 ASSET_DIR :: "../../assets/"
 
-MAX_RENDER_MIPS :: 4 // Actual mip levels created is limited by screen size
-BLOOM_LEVELS :: 2
+MAX_RENDER_MIPS :: 7 // Actual mip levels created is limited by screen size
+BLOOM_LEVELS :: 6
+#assert(BLOOM_LEVELS < MAX_RENDER_MIPS)
 
 State :: struct {
 	frame:          u64,
@@ -67,7 +68,7 @@ State :: struct {
 	// shared offscreen and postprocess render targets + pass attachments
 	offscreen_format: sg.Pixel_Format,
 	offscreen_targets: [2]sg.Image,
-	offscreen_source: sg.Image, // the offscreen target that isn't currently being rendered to
+	offscreen_source_index: int, // the offscreen target that isn't currently being rendered to
 	offscreen_depth: sg.Image,
 	offscreen_attachments: [2][MAX_RENDER_MIPS]sg.Attachments, // [image][mipmap]
 	offscreen_attachments_depth: sg.Attachments,
@@ -187,6 +188,7 @@ init :: proc(state: ^State) {
 	}
 
 	state.sim_scale = 1e-11
+	state.bloom_enabled = true
 
 	// input setup
 	register_keybind({.RETURN, .PRESS, input_newline})
@@ -354,7 +356,7 @@ step :: proc(state: ^State) {
 	draw_particles(state)
 
 	sg.end_pass()
-	state.offscreen_source = state.offscreen_targets[0]
+	state.offscreen_source_index = 0
 
 	if state.bloom_enabled {
 	    postprocess_bloom(state)
@@ -1032,102 +1034,52 @@ draw_particles :: proc(state: ^State) {
 }
 
 postprocess_bloom :: proc(state: ^State) {
-	// Bloom passes
-	// Use offscreen render for first pass
-	// TODO is there an intermediate pass that makes sense to do first so this can be re-ordered more easily, offscreen -> ? -> bloom?
-	bindings := state.postprocess_bindings
-	bindings.images[0] = state.offscreen_source
+    bindings := state.postprocess_bindings
 	uniforms := Bloom_Uniforms{strength = 1.0}
 
-	// DONW
-	sg.begin_pass(sg.Pass{
-   	    action = state.bloom_action,
-  		attachments = state.offscreen_attachments[1][1],
-   	})
-    sg.apply_pipeline(state.bloom_down_pipeline)
-    sg.apply_bindings(bindings)
-    uniforms.level = f32(0)
-    sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
-    sg.end_pass()
+    source := state.offscreen_source_index
+    dest := 1 - source
 
-    bindings.images[0] = state.offscreen_targets[1]
+    // DOWNSCALE
+    for i in 0..<BLOOM_LEVELS {
+        sg.begin_pass(sg.Pass{
+    	    action = state.bloom_action,
+    		attachments = state.offscreen_attachments[dest][i + 1],
+    	})
+        sg.apply_pipeline(state.bloom_down_pipeline)
+        bindings.images[0] = state.offscreen_targets[source]
+        sg.apply_bindings(bindings)
+        uniforms.level = f32(i)
+        sg.apply_uniforms(0, range_from_type(&uniforms))
+        sg.draw(0, 6, 1)
+        sg.end_pass()
+        dest = source
+        source = 1 - dest
+    }
 
-	sg.begin_pass(sg.Pass{
-   	    action = state.bloom_action,
-  		attachments = state.offscreen_attachments[0][2],
-   	})
-    sg.apply_pipeline(state.bloom_down_pipeline)
-    sg.apply_bindings(bindings)
-    uniforms.level = f32(1)
-    sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
-    sg.end_pass()
+    // UPSCALE
+    for i := BLOOM_LEVELS; i > 0; i -= 1 {
+        sg.begin_pass(sg.Pass{
+    	    action = state.bloom_action,
+    		attachments = state.offscreen_attachments[dest][i - 1],
+    	})
+        sg.apply_pipeline(state.bloom_up_pipeline)
+        bindings.images[0] = state.offscreen_targets[source]
+        sg.apply_bindings(bindings)
+        uniforms.level = f32(i)
+        sg.apply_uniforms(0, range_from_type(&uniforms))
+        sg.draw(0, 6, 1)
+        sg.end_pass()
+        dest = source
+        source = 1 - dest
+    }
 
-    bindings.images[0] = state.offscreen_targets[0]
-
-    // UP
-	sg.begin_pass(sg.Pass{
-   	    action = state.bloom_action,
-  		attachments = state.offscreen_attachments[1][1],
-   	})
-    sg.apply_pipeline(state.bloom_up_pipeline)
-    sg.apply_bindings(bindings)
-    uniforms.level = f32(1)
-    sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
-    sg.end_pass()
-
-    bindings.images[0] = state.offscreen_targets[1]
-
-	sg.begin_pass(sg.Pass{
-   	    action = state.bloom_action,
-  		attachments = state.offscreen_attachments[0][0],
-   	})
-    sg.apply_pipeline(state.bloom_up_pipeline)
-    sg.apply_bindings(bindings)
-    uniforms.level = f32(0)
-    sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
-    sg.end_pass()
-
-    state.offscreen_source = state.offscreen_targets[0]
-
-    // // DOWNSCALE
-    // for i in 0..<BLOOM_LEVELS {
-    //     sg.begin_pass(sg.Pass{
-    // 	    action = state.bloom_action,
-    // 		attachments = state.bloom_attachments[i],
-    // 	})
-    //     sg.apply_pipeline(state.bloom_down_pipeline)
-    //     sg.apply_bindings(state.postprocess_bindings)
-    //     uniforms.level = f32(i)
-    //     sg.apply_uniforms(0, range_from_type(&uniforms))
-    //     sg.draw(0, 6, 1)
-    //     sg.end_pass()
-    //     state.postprocess_bindings.images[0] = state.bloom_images[i % 2]
-    // }
-
-    // // UPSCALE
-    // for i in 0..<BLOOM_LEVELS {
-    //     sg.begin_pass(sg.Pass{
-    // 	    action = state.bloom_action,
-    // 		attachments = state.bloom_attachments[i],
-    // 	})
-    //     sg.apply_pipeline(state.bloom_up_pipeline)
-    //     sg.apply_bindings(state.postprocess_bindings)
-    //     uniforms.level = f32(BLOOM_LEVELS - i)
-    //     sg.apply_uniforms(0, range_from_type(&uniforms))
-    //     sg.draw(0, 6, 1)
-    //     sg.end_pass()
-    //     state.postprocess_bindings.images[0] = state.bloom_images[(i) % 2]
-    // }
-
+    state.offscreen_source_index = source
 }
 
 draw_postprocess :: proc(state: ^State) {
     sg.apply_pipeline(state.color_correct_pipeline)
-    state.postprocess_bindings.images[0] = state.offscreen_source
+    state.postprocess_bindings.images[0] = state.offscreen_targets[state.offscreen_source_index]
     sg.apply_bindings(state.postprocess_bindings)
     uniforms := Color_Correct_Uniforms{exposure = 1.0}//math.sin(f32(state.frame) / 60.0) * 0.5 + 0.5}
     sg.apply_uniforms(0, range_from_type(&uniforms))
