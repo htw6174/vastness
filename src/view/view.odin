@@ -365,7 +365,8 @@ step :: proc(state: ^State) {
 	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
 	clear(&state.point_instances)
 	for asteroid in state.world.asteroids {
-	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5) * asteroid.radius
+	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5)
+		tint.rgb *= asteroid.radius
 	    append(&state.point_instances, Point_Instance{position_from_body(asteroid, state.sim_scale), tint})
 	}
 	sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
