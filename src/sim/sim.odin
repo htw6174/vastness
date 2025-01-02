@@ -6,22 +6,29 @@ import "core:math/linalg"
 
 BIG_G :: 6.6743e-11 // the gravitational constant
 
+MAX_BODIES :: 1024 * 16
+
 World :: struct {
 	step: u64,
 	time_step: Seconds, // simulation time delta per step
 	is_running: bool,
 
 	// entities
-	sun: Body, // TODO: list for binary or trinary systems?
-	asteroids: [dynamic]Body,
+	bodies: [dynamic]Body,
+	massive_bodies: int, // slice boundary, only first [massive_bodies] bodies contribute to gravitational acceleration
 }
 
 Body :: struct {
     position: Position,
     velocity: Velocity,
     mass: Kilograms,
-    radius: f32,
+    radius: f64,
     hue: f32,
+}
+
+Orbital_Stats :: struct {
+    orbit_radius: f64,
+    orbit_velocity: f64,
 }
 
 /* Unit definitions */
@@ -47,63 +54,81 @@ init :: proc(world: ^World) {
     world.time_step = 43200
     world.is_running = true
 
-    world.sun = Body {
-        mass = 1.989e30,
-        radius = 2,
-        hue = 0.2,
-    }
+    world.bodies = make([dynamic]Body, 0, MAX_BODIES)
 
-    world.asteroids = make([dynamic]Body, 0, 1024)
-    // TEST a few randomly positioned bodies
-    // orbit radius
-    earth_r := 149.596e9
-    mars_r := 227.923e9
-    // velocity along orbit direction
-    earth_v := 29.78e3
-    mars_v := 24.07e3
-    for i in 0..<200 {
+    // sun + planets in massive body indicies
+    // sun
+    append(&world.bodies, Body{
+        mass = 1.989e30,
+        radius = 3,
+        hue = 0.2,
+    })
+    earth := body_from_orbit(149.596e9, 29.78e3, 0)
+    earth.mass = 5.9724e24
+    earth.radius = 2
+    earth.hue = 0.5
+    append(&world.bodies, earth)
+    mars := body_from_orbit(227.923e9, 24.07e3, 0)
+    mars.mass = 0.64171e24
+    mars.radius = 1.5
+    mars.hue = 0
+    append(&world.bodies, mars)
+
+    world.massive_bodies = len(world.bodies)
+
+    min_r, max_r := 149.596e9 * 0.5, 227.923e9 * 2.0
+    min_v, max_v := 24.07e3   * 0.5, 29.78e3   * 2.0
+    max_elevation := 100000.0
+    for i in 0..<4096 {
         interp := rand.float64() // random orbit distance between earth and mars
-        r := math.lerp(earth_r, mars_r, interp)
-        v := math.lerp(earth_v, mars_v, interp)
+        r := math.lerp(min_r, max_r, interp)
+        v := math.lerp(min_v, max_v, 1.0 - interp) // small radius => high velocity
         theta := rand.float64() * math.TAU // random progression along orbit
-        asteroid := Body{
-            position = {math.sin(theta) * r, rand.float64_range(-20000, 20000), math.cos(theta) * r},
-            velocity = {math.cos(theta) * v, 0, -math.sin(theta) * v},
-            radius = rand.float32_range(0.5, 2),
-            hue = rand.float32(),
-        }
-        append(&world.asteroids, asteroid)
+        asteroid := body_from_orbit(r, v, theta)
+        asteroid.position.y = rand.float64_range(-max_elevation, max_elevation)
+        asteroid.radius = rand.float64_range(0.5, 2)
+        asteroid.hue = rand.float32()
+        append(&world.bodies, asteroid)
     }
 }
 
 step :: proc(world: ^World) {
     if world.is_running == false do return
     // calculate velocity from acceleration due to gravity
-    for &body in world.asteroids {
+    for &body in world.bodies {
         accel: Acceleration = 0
-        // TEST: for now only consider sun in acceleration
-        r := body.position - world.sun.position
-        r_mag := linalg.length(r)
-        //dist := linalg.distance(world.sun, body) // Square this later, so can use square distance instead
-        a := -BIG_G * world.sun.mass / (r_mag * r_mag) // same as dot(r, r), but we need the length anyway
-        accel += a * (r / r_mag)
+
+        massive_bodies := world.bodies[:world.massive_bodies]
+        for mass in massive_bodies {
+            r := body.position - mass.position
+            r_mag := linalg.length(r)
+            if (r_mag < mass.radius) { // either the same body or about to make a singularity. Either way, don't want to factor into acceleration
+                continue
+            }
+            //dist := linalg.distance(world.sun, body) // Square this later, so can use square distance instead
+            a := -BIG_G * mass.mass / (r_mag * r_mag) // demoninator is same as dot(r, r)
+            accel += a * (r / r_mag)
+        }
 
         body.velocity += accel * world.time_step
     }
 
     // apply velocity
-    for &body in world.asteroids {
+    for &body in world.bodies {
         body.position += body.velocity * world.time_step
-        // p: [4]f64
-        // p.xyz = body.position.xyz
-        // p.w = 1
-        // body.position = (p * linalg.matrix4_rotate_f64(math.PI / 360.0, {0, 1, 0})).xyz
     }
 
 	world.step += 1
 }
 
 fini :: proc(world: ^World) {
-    delete(world.asteroids)
+    delete(world.bodies)
 	free(world)
+}
+
+body_from_orbit :: proc(radius, velocity, theta: f64) -> Body {
+    return Body{
+        position = {math.sin(theta) * radius,   0,  math.cos(theta) * radius},
+        velocity = {math.cos(theta) * velocity, 0, -math.sin(theta) * velocity},
+    }
 }

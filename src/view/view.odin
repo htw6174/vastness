@@ -180,7 +180,7 @@ MAX_FONT_INSTANCES :: 1024 * 16
 MAX_FONT_PAGE_INSTANCES :: 1024
 
 MAX_PARTICLE_INSTANCES :: 1024 * 8
-MAX_POINTS :: 1024 * 8
+MAX_POINTS :: 1024 * 16
 
 // TODO: embed in view state
 shapes: Shapes
@@ -364,10 +364,10 @@ step :: proc(state: ^State) {
 	// TODO: use real body size as radius
 	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
 	clear(&state.point_instances)
-	for asteroid in state.world.asteroids {
-	    tint := linalg.vector4_hsl_to_rgb_f32(asteroid.hue, 1, 0.5)
-		tint.rgb *= asteroid.radius
-	    append(&state.point_instances, Point_Instance{position_from_body(asteroid, state.sim_scale), tint})
+	for body in state.world.bodies {
+	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, 1, 0.5)
+		tint.rgb *= f32(body.radius) // TODO: should scale radius before using
+	    append(&state.point_instances, Point_Instance{position_from_body(body, state.sim_scale), tint})
 	}
 	sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
 
