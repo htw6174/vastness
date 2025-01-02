@@ -208,6 +208,7 @@ init :: proc(state: ^State) {
 	register_keybind({.Z, .HOLD, zoom_in})
 	register_keybind({.X, .HOLD, zoom_out})
 	register_keybind({.B, .PRESS, toggle_bloom})
+	register_keybind({.SPACE, .PRESS, toggle_play})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
@@ -790,7 +791,7 @@ state_init_postprocess :: proc(state: ^State) {
 		sg.Sampler_Desc {
 			min_filter = .LINEAR,
 			mag_filter = .LINEAR,
-			mipmap_filter = .LINEAR,
+			mipmap_filter = .NEAREST,
 			wrap_u = .CLAMP_TO_EDGE,
 			wrap_v = .CLAMP_TO_EDGE,
 			wrap_w = .CLAMP_TO_EDGE,
@@ -1172,6 +1173,10 @@ zoom_out :: proc(state: ^State) {
 
 toggle_bloom :: proc(state: ^State) {
     state.bloom_enabled = !state.bloom_enabled
+}
+
+toggle_play :: proc(state: ^State) {
+    state.world.is_running = !state.world.is_running
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator

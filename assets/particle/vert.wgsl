@@ -7,7 +7,7 @@ struct Instance {
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
+    @location(1) tint: vec4<f32>,
 };
 
 struct Uniforms {
@@ -34,6 +34,6 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     let pos = uni.p * vec4<f32>(corner, 1);
     output.position = pos;
     output.uv       = uv;
-    output.color    = inst.color;
+    output.tint    = inst.color;
     return output;
 }

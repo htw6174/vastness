@@ -9,6 +9,7 @@ BIG_G :: 6.6743e-11 // the gravitational constant
 World :: struct {
 	step: u64,
 	time_step: Seconds, // simulation time delta per step
+	is_running: bool,
 
 	// entities
 	sun: Body, // TODO: list for binary or trinary systems?
@@ -44,6 +45,7 @@ Kilograms :: f64
 
 init :: proc(world: ^World) {
     world.time_step = 43200
+    world.is_running = true
 
     world.sun = Body {
         mass = 1.989e30,
@@ -75,6 +77,7 @@ init :: proc(world: ^World) {
 }
 
 step :: proc(world: ^World) {
+    if world.is_running == false do return
     // calculate velocity from acceleration due to gravity
     for &body in world.asteroids {
         accel: Acceleration = 0
