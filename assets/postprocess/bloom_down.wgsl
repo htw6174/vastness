@@ -8,12 +8,22 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
 
+fn sample(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(text, samp, uv, uni.level).rgb;
+}
+
+fn kernel(uv: vec2<f32>) -> vec3<f32> {
+    let d = vec2<f32>(1, 1) / vec2<f32>(textureDimensions(text, uni.level));
+    let s = sample(uv + d) + sample(uv + vec2f(-d.x, d.y)) + sample(uv + vec2f(d.x , -d.y)) + sample (uv - d);
+    return s * 0.25;
+}
+
 @fragment
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // TODO: multi-sample and blend
-    let texColor = textureSampleLevel(text, samp, uv, uni.level);
+    let texColor = kernel(uv);
     //let texColor = textureSample(text, samp, uv);
-    let color = vec4<f32>(texColor.rgb, texColor.a);
+    let color = vec4<f32>(texColor, 1);
 
     return color;
 }
