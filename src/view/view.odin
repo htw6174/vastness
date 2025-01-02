@@ -14,12 +14,15 @@ import "../sim"
 
 ASSET_DIR :: "../../assets/"
 
+MAX_RENDER_MIPS :: 4 // Actual mip levels created is limited by screen size
 BLOOM_LEVELS :: 2
 
 State :: struct {
 	frame:          u64,
 	world:          ^sim.World,
 	swapchain:      sg.Swapchain,
+	width:          c.int,
+	height:         c.int,
 
 	canvas_pv:      Transform,
 	camera_view:    Transform,
@@ -28,12 +31,6 @@ State :: struct {
 	camera:         Camera,
 
 	pass_action:    sg.Pass_Action,
-	offscreen_attachments: sg.Attachments,
-	offscreen_format: sg.Pixel_Format,
-	offscreen_image: sg.Image,
-	bloom_action:   sg.Pass_Action,
-	bloom_attachments: [2][BLOOM_LEVELS]sg.Attachments, // [image][mipmap]
-	bloom_images: [2]sg.Image,
 
 	// debug quad
 	debug_bindings: sg.Bindings,
@@ -67,7 +64,18 @@ State :: struct {
 	solid_pipeline: sg.Pipeline,
 
 	// postprocess
+	// shared offscreen and postprocess render targets + pass attachments
+	offscreen_format: sg.Pixel_Format,
+	offscreen_targets: [2]sg.Image,
+	offscreen_source: sg.Image, // the offscreen target that isn't currently being rendered to
+	offscreen_depth: sg.Image,
+	offscreen_attachments: [2][MAX_RENDER_MIPS]sg.Attachments, // [image][mipmap]
+	offscreen_attachments_depth: sg.Attachments,
+
 	postprocess_bindings: sg.Bindings,
+
+	bloom_enabled: bool,
+	bloom_action:   sg.Pass_Action,
 	bloom_down_pipeline: sg.Pipeline,
 	bloom_up_pipeline: sg.Pipeline,
 	color_correct_pipeline: sg.Pipeline,
@@ -197,10 +205,11 @@ init :: proc(state: ^State) {
 	register_keybind({.V, .HOLD, roll_right})
 	register_keybind({.Z, .HOLD, zoom_in})
 	register_keybind({.X, .HOLD, zoom_out})
+	register_keybind({.B, .PRESS, toggle_bloom})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
-    state := (^State)(raw_state)
+    state: ^State = (^State)(raw_state)
 
 	// Initialize sokol_gfx
 	state.pass_action = {
@@ -211,6 +220,8 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
            	}
         }
 	}
+	state.width = 1280
+	state.height = 720
 	// Will use HDR color, so must use a float format
 	state.offscreen_format = .RGBA16F
 
@@ -226,8 +237,8 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	assert(sg.query_backend() == .WGPU)
 
 	state.swapchain = sg.Swapchain {
-		width = 1280, // TODO: does this need to be the same as the window dimensions at startup?
-		height = 720,
+		width = state.width,
+		height = state.height,
 		// Some default values from sokol environment, only need to assign if different
 		//sample_count = 1,
 		//color_format = .BGRA8,
@@ -237,7 +248,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 
 	state_init_shapes()
 
-	// fontstash: init, add defult font
+	state_init_offscreen(state)
 	state_init_font(state)
 	state_init_debug(state)
 	state_init_particles(state)
@@ -279,27 +290,6 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	}
 
 	state.text_boxes[2] = matrix_box
-
-	// Offscreen pass setup
-	state.offscreen_image = sg.make_image(sg.Image_Desc{
-		render_target = true,
-		width = 1280,
-		height = 720,
-		pixel_format = state.offscreen_format,
-	})
-	// TODO: must keep reference to dispose and re-create when screen size changes
-	offscreen_depth := sg.make_image(sg.Image_Desc{
-		render_target = true,
-		width = 1280,
-		height = 720,
-		pixel_format = .DEPTH,
-	})
-	state.offscreen_attachments = sg.make_attachments({
-	    colors = {0 = {
-			image = state.offscreen_image,
-		}},
-		depth_stencil = {image = offscreen_depth},
-	})
 }
 
 step :: proc(state: ^State) {
@@ -350,7 +340,7 @@ step :: proc(state: ^State) {
 	// Offscreen pass, anything drawn here will have post-processing applied later
 	sg.begin_pass(sg.Pass{
 	    action = state.pass_action,
-		attachments = state.offscreen_attachments,
+		attachments = state.offscreen_attachments_depth,
 	})
 
 	// Add asteroids to particle buffer
@@ -364,8 +354,11 @@ step :: proc(state: ^State) {
 	draw_particles(state)
 
 	sg.end_pass()
+	state.offscreen_source = state.offscreen_targets[0]
 
-	postprocess_bloom(state)
+	if state.bloom_enabled {
+	    postprocess_bloom(state)
+	}
 
 	// Default pass
 	sg.begin_pass(sg.Pass{action = state.pass_action, swapchain = state.swapchain})
@@ -469,6 +462,45 @@ state_init_shapes :: proc() {
 	    type = .INDEXBUFFER,
 		usage = .IMMUTABLE,
 		data = range_from_slice(cube_indicies),
+	})
+}
+
+// TODO: proc to dispose and re-init offscreen resources when surface changes
+state_init_offscreen :: proc(state: ^State) {
+    image_desc := sg.Image_Desc{
+        render_target = true,
+		width = state.width,
+		height = state.height,
+		num_mipmaps = MAX_RENDER_MIPS,
+		pixel_format = state.offscreen_format,
+   	}
+
+    state.offscreen_targets[0] = sg.make_image(image_desc)
+	state.offscreen_targets[1] = sg.make_image(image_desc)
+	image_desc.num_mipmaps = 0
+	image_desc.pixel_format = .DEPTH
+	state.offscreen_depth = sg.make_image(image_desc)
+
+	for i in 0..<MAX_RENDER_MIPS {
+    	state.offscreen_attachments[0][i] = sg.make_attachments({
+    	    colors = {0 = {
+    			image = state.offscreen_targets[0],
+    			mip_level = i32(i),
+    		}}
+    	})
+    	state.offscreen_attachments[1][i] = sg.make_attachments({
+       	    colors = {0 = {
+     			image = state.offscreen_targets[1],
+     			mip_level = i32(i),
+      		}}
+       	})
+	}
+
+	state.offscreen_attachments_depth = sg.make_attachments({
+	    colors = {0 = {
+			image = state.offscreen_targets[0],
+		}},
+		depth_stencil = {image = state.offscreen_depth},
 	})
 }
 
@@ -779,35 +811,6 @@ state_init_postprocess :: proc(state: ^State) {
 			}
 		}
 	}
-	// A single image can't be used as both a source and render target in the same pass, so must make 2 and swap between them
-	state.bloom_images[0] = sg.make_image(sg.Image_Desc{
-		render_target = true,
-		width = 640,
-		height = 360,
-		num_mipmaps = BLOOM_LEVELS,
-		pixel_format = state.offscreen_format,
-	})
-	state.bloom_images[1] = sg.make_image(sg.Image_Desc{
-		render_target = true,
-		width = 640,
-		height = 360,
-		num_mipmaps = BLOOM_LEVELS,
-		pixel_format = state.offscreen_format,
-	})
-	for i in 0..<BLOOM_LEVELS {
-    	state.bloom_attachments[0][i] = sg.make_attachments({
-    	    colors = {0 = {
-    			image = state.bloom_images[0],
-    			mip_level = i32(i),
-    		}}
-    	})
-    	state.bloom_attachments[1][i] = sg.make_attachments({
-       	    colors = {0 = {
-     			image = state.bloom_images[1],
-     			mip_level = i32(i),
-      		}}
-       	})
-	}
 	bloom_down_shader := sg.make_shader(sg.Shader_Desc{
 	    vertex_func = {source = #load(ASSET_DIR + "postprocess/vert.wgsl", cstring)},
 		fragment_func = {source = #load(ASSET_DIR + "postprocess/bloom_down.wgsl", cstring)},
@@ -1032,45 +1035,63 @@ postprocess_bloom :: proc(state: ^State) {
 	// Bloom passes
 	// Use offscreen render for first pass
 	// TODO is there an intermediate pass that makes sense to do first so this can be re-ordered more easily, offscreen -> ? -> bloom?
-	state.postprocess_bindings.images[0] = state.offscreen_image
+	bindings := state.postprocess_bindings
+	bindings.images[0] = state.offscreen_source
 	uniforms := Bloom_Uniforms{strength = 1.0}
 
+	// DONW
 	sg.begin_pass(sg.Pass{
    	    action = state.bloom_action,
-  		attachments = state.bloom_attachments[0][0],
+  		attachments = state.offscreen_attachments[1][1],
    	})
     sg.apply_pipeline(state.bloom_down_pipeline)
-    sg.apply_bindings(state.postprocess_bindings)
+    sg.apply_bindings(bindings)
     uniforms.level = f32(0)
     sg.apply_uniforms(0, range_from_type(&uniforms))
     sg.draw(0, 6, 1)
     sg.end_pass()
 
-    state.postprocess_bindings.images[0] = state.bloom_images[0]
+    bindings.images[0] = state.offscreen_targets[1]
 
 	sg.begin_pass(sg.Pass{
    	    action = state.bloom_action,
-  		attachments = state.bloom_attachments[1][1],
+  		attachments = state.offscreen_attachments[0][2],
    	})
     sg.apply_pipeline(state.bloom_down_pipeline)
-    sg.apply_bindings(state.postprocess_bindings)
-    uniforms.level = f32(0)
-    sg.apply_uniforms(0, range_from_type(&uniforms))
-    sg.draw(0, 6, 1)
-    sg.end_pass()
-
-    state.postprocess_bindings.images[0] = state.bloom_images[1]
-
-	sg.begin_pass(sg.Pass{
-   	    action = state.bloom_action,
-  		attachments = state.bloom_attachments[0][0],
-   	})
-    sg.apply_pipeline(state.bloom_up_pipeline)
-    sg.apply_bindings(state.postprocess_bindings)
+    sg.apply_bindings(bindings)
     uniforms.level = f32(1)
     sg.apply_uniforms(0, range_from_type(&uniforms))
     sg.draw(0, 6, 1)
     sg.end_pass()
+
+    bindings.images[0] = state.offscreen_targets[0]
+
+    // UP
+	sg.begin_pass(sg.Pass{
+   	    action = state.bloom_action,
+  		attachments = state.offscreen_attachments[1][1],
+   	})
+    sg.apply_pipeline(state.bloom_up_pipeline)
+    sg.apply_bindings(bindings)
+    uniforms.level = f32(1)
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+    sg.end_pass()
+
+    bindings.images[0] = state.offscreen_targets[1]
+
+	sg.begin_pass(sg.Pass{
+   	    action = state.bloom_action,
+  		attachments = state.offscreen_attachments[0][0],
+   	})
+    sg.apply_pipeline(state.bloom_up_pipeline)
+    sg.apply_bindings(bindings)
+    uniforms.level = f32(0)
+    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.draw(0, 6, 1)
+    sg.end_pass()
+
+    state.offscreen_source = state.offscreen_targets[0]
 
     // // DOWNSCALE
     // for i in 0..<BLOOM_LEVELS {
@@ -1106,7 +1127,7 @@ postprocess_bloom :: proc(state: ^State) {
 
 draw_postprocess :: proc(state: ^State) {
     sg.apply_pipeline(state.color_correct_pipeline)
-    state.postprocess_bindings.images[0] = state.bloom_images[0]
+    state.postprocess_bindings.images[0] = state.offscreen_source
     sg.apply_bindings(state.postprocess_bindings)
     uniforms := Color_Correct_Uniforms{exposure = 1.0}//math.sin(f32(state.frame) / 60.0) * 0.5 + 0.5}
     sg.apply_uniforms(0, range_from_type(&uniforms))
@@ -1195,6 +1216,10 @@ zoom_out :: proc(state: ^State) {
     log_scale := math.log10_f64(state.sim_scale)
     log_scale += 0.01
     state.sim_scale = math.pow_f64(10.0, log_scale)
+}
+
+toggle_bloom :: proc(state: ^State) {
+    state.bloom_enabled = !state.bloom_enabled
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
