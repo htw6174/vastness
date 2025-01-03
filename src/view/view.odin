@@ -15,7 +15,7 @@ import "../sim"
 ASSET_DIR :: "../../assets/"
 
 MAX_RENDER_MIPS :: 7 // Actual mip levels created is limited by screen size
-BLOOM_LEVELS :: 6
+BLOOM_LEVELS :: 2
 #assert(BLOOM_LEVELS < MAX_RENDER_MIPS)
 
 State :: struct {
