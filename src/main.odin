@@ -18,23 +18,14 @@ mainMemoryArena: mem.Arena
 view_state: ^view.State
 world: ^sim.World
 
+counter_freq: u64
+counter_last: u64
+
 when ODIN_OS != .Freestanding {
 	main :: proc() {
 		start()
-		counter_freq := platform.get_counter_frequency()
-		time_now := platform.get_counter()
-		time_last := time_now
-		acc: f64 = 0
 		for !platform.should_quit() {
-			time_now := platform.get_counter()
-			dt := f64(time_now - time_last) / f64(counter_freq)
-			acc += dt
-			if acc > 1 {
-				//fmt.printfln("last frame: %.3fms", dt * 1000)
-				acc -= 1
-			}
 			step()
-			time_last = time_now
 		}
 		stop()
 	}
@@ -58,6 +49,9 @@ start :: proc "c" () {
 	assert(x != nil)
 	free(x)
 
+	counter_freq = platform.get_counter_frequency()
+	counter_last = platform.get_counter()
+
 	world = new(sim.World)
 	sim.init(world)
 
@@ -71,8 +65,13 @@ step :: proc "contextless" () {
 	context = ctx
 	free_all(context.temp_allocator)
 
-	sim.step(world)
-	view.step(view_state)
+	counter_now := platform.get_counter()
+	counter_delta := counter_now - counter_last
+	counter_last = counter_now
+	dt := f32(counter_delta) / f32(counter_freq)
+
+	sim.step(world, dt)
+	view.step(view_state, dt)
 }
 
 @(export, link_name = "stop")

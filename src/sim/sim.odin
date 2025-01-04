@@ -13,6 +13,9 @@ World :: struct {
 	time_step: Seconds, // simulation time delta per step
 	is_running: bool,
 
+	step_frequency_inv: f32, // 1/(number of steps per second); a step will happen when the dt accumulator is >step_frequency_inv
+	dt_accumulator: f32,
+
 	// entities
 	bodies: [dynamic]Body,
 	massive_bodies: int, // slice boundary, only first [massive_bodies] bodies contribute to gravitational acceleration
@@ -51,8 +54,10 @@ Acceleration :: [3]f64
 Kilograms :: f64
 
 init :: proc(world: ^World) {
+    world.step_frequency_inv = 1.0/60.0
+    world.dt_accumulator = 0
     world.time_step = 43200
-    world.is_running = true
+    world.is_running = false
 
     world.bodies = make([dynamic]Body, 0, MAX_BODIES)
 
@@ -99,39 +104,49 @@ init :: proc(world: ^World) {
         saturn.radius = 58.232e6
         saturn.hue = 0.15
         append(&world.bodies, saturn)
-        uranus := body_from_orbit(2872.463e9, 80.0e3, 0)
+        uranus := body_from_orbit(2872.463e9, 6.80e3, 0)
         uranus.mass = 86.813e24
         uranus.radius = 25.362e6
-        uranus.hue = 0.4
+        uranus.hue = 0.6
         append(&world.bodies, uranus)
         neptune := body_from_orbit(4495.060e9, 5.43e3, 0)
         neptune.mass = 102.413e24
         neptune.radius = 24.622e6
-        neptune.hue = 0.6
+        neptune.hue = 0.4
         append(&world.bodies, neptune)
 
         world.massive_bodies = len(world.bodies)
     }
 
-    min_r, max_r := 149.596e9 * 0.5, 227.923e9 * 2.0
-    min_v, max_v := 24.07e3   * 0.5, 29.78e3   * 2.0
+    inner_r, outer_r := 227.923e9, 778.570e9
+    inner_v, outer_v := 29.78e3, 13.0e3
     min_d, max_d := 10.0, 1000.0 // size of asteroids
     max_elevation := 100000.0
     for i in 0..<4096 {
-        interp := rand.float64() // random orbit distance between earth and mars
-        r := math.lerp(min_r, max_r, interp)
-        v := math.lerp(min_v, max_v, 1.0 - interp) // small radius => high velocity
+        r := rand.float64()
+        r = r*r // square to get uniform density within circle
+        v := math.lerp(inner_v, outer_v, r) // small radius => high velocity
+        r = math.lerp(inner_r, outer_r, r)
         theta := rand.float64() * math.TAU // random progression along orbit
         asteroid := body_from_orbit(r, v, theta)
         asteroid.position.y = rand.float64_range(-max_elevation, max_elevation)
-        asteroid.radius = rand.float64_range(0.5, 2)
+        asteroid.radius = rand.float64_range(min_d, max_d)
         asteroid.hue = rand.float32()
         append(&world.bodies, asteroid)
     }
 }
 
-step :: proc(world: ^World) {
+step :: proc(world: ^World, dt: f32) {
     if world.is_running == false do return
+    world.dt_accumulator += dt
+    for world.dt_accumulator > world.step_frequency_inv {
+        sim_step(world)
+        world.dt_accumulator -= world.step_frequency_inv
+    }
+}
+
+@(private)
+sim_step :: proc(world: ^World) {
     // calculate velocity from acceleration due to gravity
     for &body in world.bodies {
         accel: Acceleration = 0

@@ -223,6 +223,8 @@ init :: proc(state: ^State) {
 	register_keybind({.SPACE, .PRESS, sim_toggle_play})
 	register_keybind({.LEFTBRACKET, .PRESS, sim_decrease_speed})
 	register_keybind({.RIGHTBRACKET, .PRESS, sim_increase_speed})
+	register_keybind({.MINUS, .PRESS, sim_decrease_freq})
+	register_keybind({.EQUALS, .PRESS, sim_increase_freq})
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
@@ -311,8 +313,7 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state.text_boxes[2] = matrix_box
 }
 
-step :: proc(state: ^State) {
-    dT: f32 = 0.0166 // TODO: get from main game loop
+step :: proc(state: ^State, dt: f32) {
     ready, render_view, resolve_view, depth_scencil_view := platform.frame_begin()
     if ready {
         state.swapchain.wgpu.render_view = render_view
@@ -335,11 +336,11 @@ step :: proc(state: ^State) {
 	move_speed: f32 = 40.0
 	rotate_speed: f32 = 1.0
 	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
-	state.camera.position += state.camera.velocity * move_speed * dT
+	state.camera.position += state.camera.velocity * move_speed * dt
 	//state.camera.rotation = linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 	state.camera.velocity = 0
 	// Make quaternion from each angle-axis rotation
-	rotate_delta := state.camera.angular_velocity * rotate_speed * dT
+	rotate_delta := state.camera.angular_velocity * rotate_speed * dt
 	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, {1, 0, 0})
 	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
 	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
@@ -1281,6 +1282,14 @@ sim_increase_speed :: proc(state: ^State) {
 
 sim_decrease_speed :: proc(state: ^State) {
     state.world.time_step /= 2
+}
+
+sim_increase_freq :: proc(state: ^State) {
+    state.world.step_frequency_inv /= 2
+}
+
+sim_decrease_freq :: proc(state: ^State) {
+    state.world.step_frequency_inv *= 2
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
