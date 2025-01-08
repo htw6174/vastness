@@ -10,6 +10,7 @@ MAX_BODIES :: 1024 * 16
 
 World :: struct {
 	step: u64,
+	time: Seconds,
 	time_step: Seconds, // simulation time delta per step
 	is_running: bool,
 
@@ -37,7 +38,7 @@ Orbital_Stats :: struct {
 /* Unit definitions */
 
 // Time
-Seconds :: f64
+Seconds :: i64
 
 // Distance
 Meters :: f64
@@ -147,6 +148,7 @@ step :: proc(world: ^World, dt: f32) {
 
 @(private)
 sim_step :: proc(world: ^World) {
+    f_step := f64(world.time_step)
     // calculate velocity from acceleration due to gravity
     for &body in world.bodies {
         accel: Acceleration = 0
@@ -163,15 +165,16 @@ sim_step :: proc(world: ^World) {
             accel += a * (r / r_mag)
         }
 
-        body.velocity += accel * world.time_step
+        body.velocity += accel * f_step
     }
 
     // apply velocity
     for &body in world.bodies {
-        body.position += body.velocity * world.time_step
+        body.position += body.velocity * f_step
     }
 
 	world.step += 1
+	world.time += world.time_step
 }
 
 fini :: proc(world: ^World) {

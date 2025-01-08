@@ -15,8 +15,7 @@ import "../sim"
 ASSET_DIR :: "../../assets/"
 
 MAX_RENDER_MIPS :: 7 // Actual mip levels created is limited by screen size
-BLOOM_LEVELS :: 2
-#assert(BLOOM_LEVELS < MAX_RENDER_MIPS)
+MAX_BLOOM_LEVELS :: MAX_RENDER_MIPS - 1
 
 State :: struct {
 	frame:          u64,
@@ -82,6 +81,7 @@ State :: struct {
 	postprocess_bindings: sg.Bindings,
 
 	bloom_enabled: bool,
+	bloom_iters: int,
 	bloom_action:   sg.Pass_Action,
 	bloom_down_pipeline: sg.Pipeline,
 	bloom_up_pipeline: sg.Pipeline,
@@ -200,7 +200,8 @@ init :: proc(state: ^State) {
 	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 6.0, {1, 0, 0}) * linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
 
 	state.sim_scale = 1e-10
-	state.bloom_enabled = false
+	state.bloom_enabled = true
+	state.bloom_iters = 4
 
 	// input setup
 	register_keybind({.RETURN, .PRESS, input_newline})
@@ -225,6 +226,65 @@ init :: proc(state: ^State) {
 	register_keybind({.RIGHTBRACKET, .PRESS, sim_increase_speed})
 	register_keybind({.MINUS, .PRESS, sim_decrease_freq})
 	register_keybind({.EQUALS, .PRESS, sim_increase_freq})
+	register_keybind({.COMMA, .PRESS, bloom_decrease_iters})
+	register_keybind({.PERIOD, .PRESS, bloom_increase_iters})
+
+
+	state_init_fonts(state)
+
+	// Construct some sample text boxes
+	entry_box := Text_Box {
+	    text = strings.builder_make(),
+		font_state = {
+		    font = state.fonts[0],
+			size = 40,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		color = {1, 1, 1, 1},
+		rect = {8, 80, 400, 460},
+		scale = 1,
+	}
+	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move camera\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle blur\nSpace: play/pause\n[/]: Change sim timescale\n-/=: Change sim steps per second\nPress ` to make this\ntext box active.\nTry entering a few lines!")
+	state.text_boxes[0] = entry_box
+
+	stats_box := Text_Box {
+	    text = strings.builder_make(),
+		font_state = {
+		    font = state.fonts[1],
+			size = 8,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		color = {1, 1, 1, 1},
+		rect = {8, 8, 1000, 80},
+		scale = 2,
+	}
+
+	state.text_boxes[1] = stats_box
+
+	/*
+    matrix_box := Text_Box {
+	    text = strings.builder_make(),
+		font_state = {
+		    font = state.font_default,
+			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
+			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
+			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
+			size = 20,
+			// Defaults: Left, Baseline
+			ah = .LEFT,
+			av = .TOP,
+		},
+		color = {0, 1, 0, 1},
+		rect = {500, 5, 1, 600}, // NOTE: width must be >0 for fadeout effect to work
+		scale = 2,
+	}
+
+	state.text_boxes[2] = matrix_box
+	*/
 }
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
@@ -269,48 +329,12 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	state_init_shapes()
 
 	state_init_offscreen(state)
-	state_init_font(state)
+	state_init_text(state)
 	state_init_debug(state)
 	state_init_points(state)
 	state_init_particles(state)
 	state_init_solids(state)
 	state_init_postprocess(state)
-
-	// Construct some sample text boxes
-	entry_box := Text_Box {
-	    text = strings.builder_make(),
-		font_state = {
-		    font = state.fonts[0],
-			size = 40,
-			// Defaults: Left, Baseline
-			ah = .LEFT,
-			av = .TOP,
-		},
-		color = {1, 1, 1, 1},
-		rect = {5, 5, 400, 440},
-		scale = 1,
-	}
-	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move camera\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle blur\nSpace: play/pause\n[/]: Change sim speed\nPress ` to make this\ntext box active.\nTry entering a few lines!")
-	state.text_boxes[0] = entry_box
-
-    matrix_box := Text_Box {
-	    text = strings.builder_make(),
-		font_state = {
-		    font = state.font_default,
-			// NOTE: even though size is given as a float, shouldn't use anything smaller than the font's native pixel size
-			// NOTE: for pixel fonts, I can use a smaller atlas by rendering them all at native pixel size, then scaling later with transforms
-			// Some transform math might also be necessary to ensure pixel font quads are always screen pixel-aligned
-			size = 20,
-			// Defaults: Left, Baseline
-			ah = .LEFT,
-			av = .TOP,
-		},
-		color = {0, 1, 0, 1},
-		rect = {500, 5, 1, 600}, // NOTE: width must be >0 for fadeout effect to work
-		scale = 2,
-	}
-
-	state.text_boxes[2] = matrix_box
 }
 
 step :: proc(state: ^State, dt: f32) {
@@ -413,6 +437,11 @@ step :: proc(state: ^State, dt: f32) {
 	// sg.apply_uniforms(0, range_from_type(&cube_uniforms))
 	// sg.draw(0, 36, 1)
 
+	strings.builder_reset(&state.text_boxes[1].text)
+	write_clockstring_from_seconds(&state.text_boxes[1].text, state.world.time)
+	strings.write_rune(&state.text_boxes[1].text, '\n')
+	fmt.sbprintf(&state.text_boxes[1].text, "running %.0f steps/second; %d sim seconds/step", 1.0 / state.world.step_frequency_inv, state.world.time_step)
+
 	// draw 2D UI over everything else
 	draw_ui(state)
 
@@ -438,6 +467,35 @@ step :: proc(state: ^State, dt: f32) {
 fini :: proc(state: ^State) {
 	sg.shutdown()
 	platform.shutdown()
+}
+
+/* Non-graphics setup (can be done before device is aquired) */
+
+state_init_fonts :: proc(state: ^State) {
+    // NB: fontstash init sets many font context fields but does not check for existing data. Set any overrides only after init
+	fs.Init(&state.font_context, DEFAULT_FONT_ATLAS_SIZE, DEFAULT_FONT_ATLAS_SIZE, .TOPLEFT)
+	state.font_context.userData = state
+	state.font_context.callbackResize = font_resize_atlas
+	state.font_context.callbackUpdate = font_update_atlas
+	state.font_default = fs.AddFontMem(
+		&state.font_context,
+		"Default",
+		// TODO: pick some system font with wide character support, like droid*
+		#load(ASSET_DIR + "font/Darinia.ttf"),
+		false,
+	)
+	state.fonts[0] = fs.AddFontMem(
+	    &state.font_context,
+		"Yulong",
+		#load(ASSET_DIR + "font/Yulong-Regular.ttf"),
+		false,
+	)
+	state.fonts[1] = fs.AddFontMem(
+	    &state.font_context,
+		"Not Jam Mono",
+		#load(ASSET_DIR + "font/Not Jam Mono Clean 8.ttf"),
+		false,
+	)
 }
 
 /* Graphics Setup */
@@ -755,26 +813,7 @@ state_init_debug :: proc(state: ^State) {
 	)
 }
 
-state_init_font :: proc(state: ^State) {
-	// NB: fontstash init sets many font context fields but does not check for existing data. Set any overrides only after init
-	fs.Init(&state.font_context, DEFAULT_FONT_ATLAS_SIZE, DEFAULT_FONT_ATLAS_SIZE, .TOPLEFT)
-	state.font_context.userData = state
-	state.font_context.callbackResize = font_resize_atlas
-	state.font_context.callbackUpdate = font_update_atlas
-	state.font_default = fs.AddFontMem(
-		&state.font_context,
-		"Default",
-		// TODO: pick some system font with wide character support, like droid*
-		#load(ASSET_DIR + "font/Darinia.ttf"),
-		false,
-	)
-	state.fonts[0] = fs.AddFontMem(
-	    &state.font_context,
-		"Yulong",
-		#load(ASSET_DIR + "font/Yulong-Regular.ttf"),
-		false,
-	)
-
+state_init_text :: proc(state: ^State) {
 	state.text_instances = make([]Font_Instance, MAX_FONT_INSTANCES)
 	state.text_instance_scratch[0] = make([]Font_Instance, MAX_FONT_PAGE_INSTANCES)
 	state.text_instance_scratch[1] = make([]Font_Instance, MAX_FONT_PAGE_INSTANCES)
@@ -803,8 +842,9 @@ state_init_font :: proc(state: ^State) {
 
 	state.font_atlas = sg.make_image(
 		sg.Image_Desc {
-			width        = c.int(state.font_context.width),
-			height       = c.int(state.font_context.height),
+		    // Must use minimum size in case device is ready before fonts load
+			width        = c.int(math.max(state.font_context.width, DEFAULT_FONT_ATLAS_SIZE)),
+			height       = c.int(math.max(state.font_context.height, DEFAULT_FONT_ATLAS_SIZE)),
 			usage        = .DYNAMIC,
 			pixel_format = .R8, // NOTE: unsigned normal is the default if no postfix on pixel format in sokol_gfx
 		},
@@ -1139,7 +1179,7 @@ postprocess_bloom :: proc(state: ^State) {
     dest := 1 - source
 
     // DOWNSCALE
-    for i in 0..<BLOOM_LEVELS {
+    for i in 0..<state.bloom_iters {
         sg.begin_pass(sg.Pass{
     	    action = state.bloom_action,
     		attachments = state.offscreen_attachments[dest][i + 1],
@@ -1156,7 +1196,7 @@ postprocess_bloom :: proc(state: ^State) {
     }
 
     // UPSCALE
-    for i := BLOOM_LEVELS; i > 0; i -= 1 {
+    for i := state.bloom_iters; i > 0; i -= 1 {
         sg.begin_pass(sg.Pass{
     	    action = state.bloom_action,
     		attachments = state.offscreen_attachments[dest][i - 1],
@@ -1193,6 +1233,7 @@ font_resize_atlas :: proc(data: rawptr, w, h: int) {
 // Must ignore the raw texture data passed as last param because the length has been discarded by a raw_data call, just use the context instead
 font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
     state := (^State)(data)
+    if state.font_atlas.id == 0 do return // TODO: might cause text set during init to not be drawn until another atlas update happens
 	sg.update_image(
 		state.font_atlas,
 		{
@@ -1272,24 +1313,37 @@ toggle_bloom :: proc(state: ^State) {
     state.bloom_enabled = !state.bloom_enabled
 }
 
+bloom_increase_iters :: proc(state: ^State) {
+    state.bloom_iters = math.min(state.bloom_iters + 1, MAX_BLOOM_LEVELS)
+}
+
+bloom_decrease_iters :: proc(state: ^State) {
+    state.bloom_iters = math.max(state.bloom_iters - 1, 0)
+}
+
 sim_toggle_play :: proc(state: ^State) {
     state.world.is_running = !state.world.is_running
 }
 
 sim_increase_speed :: proc(state: ^State) {
-    state.world.time_step *= 2
+    // No specific upper limit, but sim becomes very unstable at time steps >~1mil
+    // TODO: is there a more general way to clamp within range of type?
+    state.world.time_step = math.min(state.world.time_step * 2, 1 << 62)
 }
 
 sim_decrease_speed :: proc(state: ^State) {
-    state.world.time_step /= 2
+    // Time resolution bottoms out at 1 second
+    state.world.time_step = math.max(state.world.time_step / 2, 1)
 }
 
 sim_increase_freq :: proc(state: ^State) {
-    state.world.step_frequency_inv /= 2
+    // never more than 480 steps per second: prevent main thread locking at insane frequencies
+    state.world.step_frequency_inv = math.max(state.world.step_frequency_inv / 2, 1.0/480.0)
 }
 
 sim_decrease_freq :: proc(state: ^State) {
-    state.world.step_frequency_inv *= 2
+    // never less than one step per second
+    state.world.step_frequency_inv = math.min(state.world.step_frequency_inv * 2, 1)
 }
 
 // NOTE: raw_text is in a cstring format, i.e. 0-terminated and potentially with junk data after the terminator
