@@ -6,6 +6,7 @@
         <style type="text/css">
             body {
                 margin: 0;
+                background-color: black;
             }
             .game {
                 position: absolute;
@@ -20,13 +21,59 @@
         </style>
     </head>
     <body>
-        <canvas class="game" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+        <div id="warning" style="display: none; color: red; text-align: center; margin-top: 2%; font-weight: bold;">
+            WebGPU is not supported in your browser. For Windows or Mac, use Chrome, Edge, or another Chromium-based browser. For Linux, <a href="https://github.com/gpuweb/gpuweb/wiki/Implementation-Status">see here</a>.
+        </div>
+        <canvas class="game" id="canvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
         <script type="text/javascript">
-            var Module = {
-                canvas: (function () {
-                    return document.getElementById("canvas");
-                })(),
-            };
+            // Check for WebGPU support. Checking for the existance of navigator.gpu is the recommended way to check for webgpu support according to the mdn docs, but there are situations where it is defined *without* full webgpu support, and the result of an adapter request must also be checked.
+            async function checkWebGPUSupport() {
+                const warningDiv = document.getElementById("warning");
+                const canvas = document.getElementById("canvas");
+    
+                if (!navigator.gpu) {
+                    // If navigator.gpu is not available, show the warning
+                    warningDiv.style.display = "block";
+                    canvas.style.display = "none";
+                    return;
+                }
+    
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (!adapter) {
+                        // If requestAdapter fails, show the warning
+                        warningDiv.style.display = "block";
+                        canvas.style.display = "none";
+                        return;
+                    }
+                    // Initialize the canvas for the game
+                    var Module = {
+                        canvas: (function () {
+                            return canvas;
+                        })(),
+                    };
+                } catch (error) {
+                    // If an error occurs, show the warning
+                    warningDiv.style.display = "block";
+                    canvas.style.display = "none";
+                }
+            }
+            
+            // Enable refresh, fullscreen, and dev console while canvas is focused
+            document.getElementById("canvas").addEventListener("keydown", (event) => {
+                const passKeys = [
+                     "F12", // Developer console
+                     "F11", // Fullscreen
+                     "F5",  // Refresh
+                ];
+                if (passKeys.includes(event.key)) {
+                    event.stopPropagation();
+                    return false;
+                }
+                event.preventDefault();
+            });
+            
+            checkWebGPUSupport();
         </script>
         <script src="game.js"></script>
     </body>

@@ -21,6 +21,7 @@ State :: struct {
 	frame:          u64,
 	world:          ^sim.World,
 	swapchain:      sg.Swapchain,
+	surface_format: sg.Pixel_Format,
 	width:          c.int,
 	height:         c.int,
 
@@ -302,13 +303,15 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 	uw, uh := platform.get_render_bounds()
 	state.width = c.int(uw)
 	state.height = c.int(uh)
+	// TODO: ensure device supports format, use one of BGRA8 or RGBA8
+	state.surface_format = .BGRA8
 	// Will use HDR color, so must use a float format
 	state.offscreen_format = .RGBA16F
 
 	sg.setup(
 		sg.Desc {
 			environment = {
-				defaults = {color_format = .BGRA8, depth_format = .DEPTH},
+				defaults = {color_format = state.surface_format, depth_format = .DEPTH},
 				wgpu = {device = device},
 			},
 			logger = {func = platform.slog_func},
@@ -413,7 +416,6 @@ step :: proc(state: ^State, dt: f32) {
 	}
 
 	draw_points(state)
-	draw_particles(state)
 
 	sg.end_pass()
 	state.offscreen_source_index = 0
@@ -427,6 +429,7 @@ step :: proc(state: ^State, dt: f32) {
 
 	// draw final output of post-processing stack
 	draw_postprocess(state)
+	draw_particles(state)
 
 	// draw reference cube at world origin
 	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
@@ -727,7 +730,7 @@ state_init_particles :: proc(state: ^State) {
         },
         colors = {
             0 = {
-                pixel_format = state.offscreen_format,
+                pixel_format = state.surface_format,
                 blend = {
                     enabled = true,
                     src_factor_rgb = .SRC_ALPHA,
