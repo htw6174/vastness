@@ -280,6 +280,14 @@ get_render_bounds :: proc() -> (width, height: u32) {
 	return u32(iw), u32(ih)
 }
 
+log :: proc(message: string) {
+    fmt.println(message)
+}
+
+logf :: proc(format: string, args: ..any) {
+    fmt.printfln(format, ..args)
+}
+
 slog_basic :: proc(message: cstring, line: u32 = #line, file: cstring = #file) {
 	slog_func("main", 3, 0, message, line, file, nil)
 }

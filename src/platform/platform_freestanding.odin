@@ -285,6 +285,15 @@ get_render_bounds :: proc() -> (width, height: u32) {
 foreign _ {
 	slog_func :: proc "c" (tag: cstring, log_level: u32, log_item_id: u32, message: cstring, line: u32, filename: cstring, usr_data: rawptr) ---
 	get_canvas_size :: proc "c" (width, height: ^f64) ---
+	emscripten_log :: proc "c" (flags: c.int, format: cstring, #c_vararg args: ..any)
+}
+
+log :: proc(message: string) {
+    emscripten_log(0, cstring(message))
+}
+
+logf :: proc(format: string, args: ..any) {
+    emscripten_log(0, cstring(format), ..args)
 }
 
 slog_basic :: proc(message: cstring, line: u32 = #line, file: cstring = #file) {
