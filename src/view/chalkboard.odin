@@ -301,19 +301,20 @@ draw_text_box :: proc(state: ^State, text_box: ^Text_Box, instance_buffer: []Fon
 	scratch_index := 0
 	curr_length, prev_length := 0, 0 // Number of instances drawn on each page
 	for i := 0; i < glyph_max && fs.TextIterNext(fc, &iter, &quad); i += 1 {
-		cb.text_instance_scratch[scratch_index][curr_length] = {
-			pos_min = {quad.x0, quad.y0},
-			pos_max = {quad.x1, quad.y1},
-			uv_min  = {quad.s0, quad.t0},
-			uv_max  = {quad.s1, quad.t1},
-			// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
-			// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
-			// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
-			color   = text_box.color,
+	    if !unicode.is_white_space(iter.codepoint) {
+			cb.text_instance_scratch[scratch_index][curr_length] = {
+				pos_min = {quad.x0, quad.y0},
+				pos_max = {quad.x1, quad.y1},
+				uv_min  = {quad.s0, quad.t0},
+				uv_max  = {quad.s1, quad.t1},
+				// FIXME: why does the fragment shader interpret this as (1, 0, 0, 0) after unpacking?
+				// Seems that the latter 3 bytes are always 0 in the vertex shader. Why?
+				// Changing to a float4 fixes things, but why doesn't a ubyte4 work?
+				color   = text_box.color,
+			}
+			curr_length += 1
 		}
-		curr_length += 1
 		// Horizontal wrap on newline characters
-		// FIXME: skip creating an instance for newline (and other whitespace?) characters, to avoid the font's 'missing' glyph appearing
 		if iter.codepoint == '\n' {
 		    iter.nextx = 0
 			iter.nexty += line_height
@@ -366,7 +367,6 @@ draw_text_box :: proc(state: ^State, text_box: ^Text_Box, instance_buffer: []Fon
 
 font_resize_atlas :: proc(data: rawptr, w, h: int) {
     cb := (^Chalkboard_State)(data)
-    // TODO
     log("Resizing font atlas")
     logf("Old size: %d, %d", cb.font_context.width, cb.font_context.height)
     logf("New size: %d, %d", w, h)
@@ -376,10 +376,9 @@ font_resize_atlas :: proc(data: rawptr, w, h: int) {
 		height       = c.int(h),
 		usage        = .DYNAMIC,
 		pixel_format = .R8,
-		// feature request: why can't I use data.subimage[0][0] on the lhs here?
-		//data = {subimage = {0 = {0 = range_from_slice(cb.font_context.textureData)}}},
 	})
 	cb.text_bindings.images[0] = cb.font_atlas
+	// TODO: ensure that fontstash will call font_update_atlas after a resize; if not call manually
 }
 
 // Must ignore the raw texture data passed as last param because the length has been discarded by a raw_data call, just use the context instead
@@ -389,6 +388,7 @@ font_update_atlas :: proc(data: rawptr, dirtyRect: [4]f32, _: rawptr) {
 	sg.update_image(
 		cb.font_atlas,
 		{
+		    // feature request: why can't I use subimage[0][0] on the lhs here?
 			subimage = { // [cubemap face][mip level]sg.Range
 				0 = {
 					0 = range_from_slice(cb.font_context.textureData)

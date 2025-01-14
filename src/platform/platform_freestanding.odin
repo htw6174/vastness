@@ -3,6 +3,7 @@ package platform
 import "base:runtime"
 import "core:c"
 import "core:fmt"
+import "core:strings"
 
 /* Custom vendor packages made to work with wasm */
 import sdl2 "sdl2"
@@ -285,15 +286,15 @@ get_render_bounds :: proc() -> (width, height: u32) {
 foreign _ {
 	slog_func :: proc "c" (tag: cstring, log_level: u32, log_item_id: u32, message: cstring, line: u32, filename: cstring, usr_data: rawptr) ---
 	get_canvas_size :: proc "c" (width, height: ^f64) ---
-	emscripten_log :: proc "c" (flags: c.int, format: cstring, #c_vararg args: ..any)
+	emscripten_log :: proc "c" (flags: c.int, format: cstring, #c_vararg args: ..any) ---
 }
 
 log :: proc(message: string) {
-    emscripten_log(0, cstring(message))
+    emscripten_log(0, strings.unsafe_string_to_cstring(message))
 }
 
 logf :: proc(format: string, args: ..any) {
-    emscripten_log(0, cstring(format), ..args)
+    emscripten_log(0, strings.unsafe_string_to_cstring(format), args)
 }
 
 slog_basic :: proc(message: cstring, line: u32 = #line, file: cstring = #file) {
