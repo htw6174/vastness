@@ -137,14 +137,26 @@ window_init :: proc(initialized_callback: proc(user_data: rawptr, device: rawptr
 	}
 }
 
-// return handle to surface texture that will be presented at frame_end, or nil if surface isn't ready
-frame_begin :: proc() -> (ready: bool, render_view: rawptr, resolve_view: rawptr, depth_stencil_view: rawptr) {
+Frame_State :: struct {
+    // if true, render surface is ready and can be presented to. Functionally identical to render_view == nil
+    ready: bool,
+    // true if size of display surface changed since last frame
+    surface_changed: bool,
+    render_view: rawptr,
+    resolve_view: rawptr,
+    depth_stencil_view: rawptr,
+}
+
+// return true
+frame_begin :: proc() -> Frame_State {
+    frame := Frame_State{ready = false}
 	if !state.initialized {
-		return false, nil, nil, nil
+		return frame
 	}
 
 	// FIXME: browser wgpu reports that the depth texture size is lagging behind the surface texture, causing size mismatches briefly when resizing. Doesn't seem to break anything, but fixing would reduce logspam.
 	if state.surface_changed {
+        frame.surface_changed = true
 	    swapchain_refresh()
 		state.surface_changed = false
 	}
@@ -159,14 +171,18 @@ frame_begin :: proc() -> (ready: bool, render_view: rawptr, resolve_view: rawptr
 			wgpu.TextureRelease(state.render_texture.texture)
 		}
 		swapchain_refresh()
-		return false, nil, nil, nil
+		// TODO: potential bug here where a resize happens on the same frame as another surface change, but the view returns before handling the resize
+		// ^ Could also cause a swapchain refresh to happen twice in one frame, wasting work
+		return frame
 	case .DeviceLost, .OutOfMemory:
 		panic("Surface texture device error")
 	}
 	state.render_view = wgpu.TextureCreateView(state.render_texture.texture)
-	// TODO: create and use depth buffer texture
-	//state.swapchain.wgpu.depth_stencil_view =
-	return true, state.render_view, state.resolve_view, state.depth_stencil_view
+	frame.ready = true
+	frame.render_view = state.render_view
+	frame.resolve_view = state.resolve_view
+	frame.depth_stencil_view = state.depth_stencil_view
+	return frame
 }
 
 poll_events :: proc(event_callback: Event_Handler, user_data: rawptr) {

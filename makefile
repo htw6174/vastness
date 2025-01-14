@@ -3,8 +3,11 @@ native:
 	mkdir -p build
 	odin run src -define:SOKOL_WGPU=true -out:build/game -debug
 
-wasm: build/odin.wasm.o
+wasm:
 	echo "emcc build"
+
+	mkdir -p build
+	odin build src -target=freestanding_wasm32 -out:build/odin -build-mode:obj -debug -show-system-calls
 
 	emcc src/main.c \
 	build/odin.wasm.o \
@@ -17,7 +20,3 @@ wasm: build/odin.wasm.o
 	-s USE_WEBGPU=1 \
 	-s INITIAL_MEMORY=128mb \
 	-o web/game.js
-
-build/odin.wasm.o : src/*
-	mkdir -p build
-	odin build src -target=freestanding_wasm32 -out:build/odin -build-mode:obj -debug -show-system-calls

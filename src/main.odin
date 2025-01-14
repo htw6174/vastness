@@ -1,6 +1,7 @@
 package main
 
 import "base:runtime"
+import "core:math"
 import "core:mem"
 
 import "platform"
@@ -69,6 +70,8 @@ step :: proc "contextless" () {
 	counter_delta := counter_now - counter_last
 	counter_last = counter_now
 	dt := f32(counter_delta) / f32(counter_freq)
+	// NB: cap dt to 30fps equivalent so that stalls, backgrounding, pausing, freezing, etc. don't cause other systems to make large jumps or attempt to play catch-up for the missing time
+	dt = math.min(dt, 1.0 / 30.0)
 
 	sim.step(world, dt)
 	view.step(view_state, dt)

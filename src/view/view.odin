@@ -341,20 +341,26 @@ _late_init :: proc(raw_state: rawptr, device: rawptr) {
 }
 
 step :: proc(state: ^State, dt: f32) {
-    ready, render_view, resolve_view, depth_scencil_view := platform.frame_begin()
-    if ready {
-        state.swapchain.wgpu.render_view = render_view
-        state.swapchain.wgpu.resolve_view = resolve_view
-        state.swapchain.wgpu.depth_stencil_view = depth_scencil_view
-    } else {
+    frame := platform.frame_begin()
+    if !frame.ready {
         return
     }
     defer platform.frame_end()
+
+    state.swapchain.wgpu.render_view = frame.render_view
+    state.swapchain.wgpu.resolve_view = frame.resolve_view
+    state.swapchain.wgpu.depth_stencil_view = frame.depth_stencil_view
 
     platform.poll_events(handle_event, state)
     handle_input_state(state)
 
 	width, height := platform.get_render_bounds()
+	state.width = c.int(width)
+	state.height = c.int(height)
+	if frame.surface_changed {
+		offscreen_refresh(state)
+	}
+
 	canvas_view := linalg.MATRIX4F32_IDENTITY // TODO?
 	// NDC in Wgpu are -1, -1 at bottom-left of screen, +1, +1 at top-right
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
@@ -564,8 +570,7 @@ state_init_shapes :: proc() {
 	})
 }
 
-// TODO: proc to dispose and re-init offscreen resources when surface changes
-state_init_offscreen :: proc(state: ^State) {
+offscreen_create :: proc(state: ^State) {
     image_desc := sg.Image_Desc{
         render_target = true,
 		width = state.width,
@@ -581,26 +586,48 @@ state_init_offscreen :: proc(state: ^State) {
 	state.offscreen_depth = sg.make_image(image_desc)
 
 	for i in 0..<MAX_RENDER_MIPS {
-    	state.offscreen_attachments[0][i] = sg.make_attachments({
-    	    colors = {0 = {
-    			image = state.offscreen_targets[0],
-    			mip_level = i32(i),
-    		}}
-    	})
-    	state.offscreen_attachments[1][i] = sg.make_attachments({
+       	state.offscreen_attachments[0][i] = sg.make_attachments({
+       	    colors = {0 = {
+     			image = state.offscreen_targets[0],
+     			mip_level = i32(i),
+      		}}
+       	})
+       	state.offscreen_attachments[1][i] = sg.make_attachments({
        	    colors = {0 = {
      			image = state.offscreen_targets[1],
      			mip_level = i32(i),
       		}}
        	})
-	}
+   	}
 
-	state.offscreen_attachments_depth = sg.make_attachments({
-	    colors = {0 = {
-			image = state.offscreen_targets[0],
-		}},
-		depth_stencil = {image = state.offscreen_depth},
-	})
+    state.offscreen_attachments_depth = sg.make_attachments({
+   	    colors = {0 = {
+            image = state.offscreen_targets[0],
+        }},
+        depth_stencil = {image = state.offscreen_depth},
+    })
+}
+
+offscreen_release :: proc(state: ^State) {
+    sg.destroy_image(state.offscreen_targets[0])
+    sg.destroy_image(state.offscreen_targets[1])
+    sg.destroy_image(state.offscreen_depth)
+
+    for i in 0..<MAX_RENDER_MIPS {
+        sg.destroy_attachments(state.offscreen_attachments[0][i])
+        sg.destroy_attachments(state.offscreen_attachments[1][i])
+    }
+    sg.destroy_attachments(state.offscreen_attachments_depth)
+}
+
+offscreen_refresh :: proc(state: ^State) {
+    offscreen_release(state)
+    offscreen_create(state)
+}
+
+// TODO: proc to dispose and re-init offscreen resources when surface changes
+state_init_offscreen :: proc(state: ^State) {
+    offscreen_create(state)
 }
 
 state_init_solids :: proc(state: ^State) {
