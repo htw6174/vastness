@@ -3,7 +3,6 @@ package platform
 import "base:runtime"
 import "core:c"
 import "core:fmt"
-import "core:strings"
 
 /* Custom vendor packages made to work with wasm */
 import sdl2 "sdl2"
@@ -290,11 +289,12 @@ foreign _ {
 }
 
 log :: proc(message: string) {
-    emscripten_log(0, strings.unsafe_string_to_cstring(message))
+    logf(message)
 }
 
 logf :: proc(format: string, args: ..any) {
-    emscripten_log(0, strings.unsafe_string_to_cstring(format), args)
+    formatted := fmt.ctprintfln(format, ..args)
+    emscripten_log(0, formatted)
 }
 
 slog_basic :: proc(message: cstring, line: u32 = #line, file: cstring = #file) {

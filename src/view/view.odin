@@ -186,6 +186,7 @@ init :: proc(state: ^State) {
 
 _late_init :: proc(raw_state: rawptr, device: rawptr) {
     state: ^State = (^State)(raw_state)
+    log("Graphics device initialized!")
 
 	// Initialize sokol_gfx
 	state.pass_action = {
