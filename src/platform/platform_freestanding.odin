@@ -292,6 +292,7 @@ log :: proc(message: string) {
     logf(message)
 }
 
+// TODO: more comprehensive logging utilities through emscripten. See https://emscripten.org/docs/api_reference/emscripten.h.html#logging-utilities
 logf :: proc(format: string, args: ..any) {
     formatted := fmt.ctprintfln(format, ..args)
     emscripten_log(0, formatted)

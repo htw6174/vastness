@@ -130,7 +130,7 @@ init :: proc(world: ^World) {
         r = math.lerp(inner_r, outer_r, r)
         theta := rand.float64() * math.TAU // random progression along orbit
         asteroid := body_from_orbit(r, v, theta)
-        asteroid.position.y = rand.float64_range(-max_elevation, max_elevation)
+        asteroid.position.z = rand.float64_range(-max_elevation, max_elevation)
         asteroid.radius = rand.float64_range(min_d, max_d)
         asteroid.hue = rand.float32()
         append(&world.bodies, asteroid)
@@ -184,7 +184,7 @@ fini :: proc(world: ^World) {
 
 body_from_orbit :: proc(radius, velocity, theta: f64) -> Body {
     return Body{
-        position = {math.sin(theta) * radius,   0,  math.cos(theta) * radius},
-        velocity = {math.cos(theta) * velocity, 0, -math.sin(theta) * velocity},
+        position = {math.cos(theta) * radius, math.sin(theta) * radius, 0},
+        velocity = {-math.sin(theta) * velocity, math.cos(theta) * velocity, 0},
     }
 }

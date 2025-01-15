@@ -125,7 +125,6 @@ Camera :: struct {
     angular_velocity: Vec3,
     fov: f32,
     near_clip: f32,
-    far_clip: f32,
 }
 
 Vec2 :: [2]f32
@@ -133,7 +132,7 @@ Vec3 :: [3]f32
 Vec4 :: [4]f32
 Color :: [4]f32
 Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
-Transform :: matrix[4, 4]f32
+Transform :: matrix[4, 4]f32 // z-up, right-handed coordinate system
 
 // TODO: embed in view state
 shapes: Shapes
@@ -143,12 +142,12 @@ init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
 
 	state.camera = {
-	    position = {0, 0, -100},
+	    position = {0, -20, 0},
 	    near_clip = 0.1,
-		far_clip = 1000,
 		fov = math.PI / 4.0,
 	}
-	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 6.0, {1, 0, 0}) * linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
+	// Identity rotation is towards +z
+	state.camera.rotation = 1//linalg.quaternion_angle_axis_f32(-math.PI / 1.0, {1, 0, 0})
 
 	state.sim_scale = 1e-10
 	state.bloom_enabled = true
@@ -272,19 +271,38 @@ step :: proc(state: ^State, dt: f32) {
 	// Make quaternion from each angle-axis rotation
 	rotate_delta := state.camera.angular_velocity * rotate_speed * dt
 	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, {1, 0, 0})
-	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
-	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
+	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
+	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
 	// Make rotation matrix from combined quaternions (multiply them all together)
-	state.camera.rotation = q_roll * q_yaw * q_pitch * state.camera.rotation
+	state.camera.rotation = q_yaw * q_roll * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
+	// manual lookAt matrix construction
+	r, f, u: Vec3
+	f = linalg.mul(state.camera.rotation, Vec3{0, 1, 0})
+	//u = linalg.mul(linalg.quaternion_angle_axis_f32(math.PI / 2.0, {1, 0, 0}), f)
+	r = linalg.normalize(linalg.cross(f, Vec3{0, 0, 1}))
+	u = linalg.cross(r, f)
+	look_at := Transform{
+	    r.x, r.y, r.z, 0,
+		u.x, u.y, u.z, 0,
+		f.x, f.y, f.z, 0,
+		0,   0,   0,   1,
+	}
+	look_at = linalg.transpose(look_at)
+
 	state.camera_view =
-	    linalg.matrix4_translate_f32(-state.camera.position) *
-		linalg.matrix4_from_quaternion_f32(state.camera.rotation)
+        look_at *
+		//linalg.matrix4_from_quaternion_f32(state.camera.rotation)*
+		//linalg.matrix4_look_at_f32(0, f, {0, 0, 1}, false) *
+	    linalg.matrix4_translate_f32(-state.camera.position)
+		//linalg.matrix4_look_at_from_fru_f32(state.camera.position, f, r, u, false)
+		//linalg.matrix4_look_at_f32(state.camera.position, state.camera.position + f, {0, 0, 1}, false)
 
 	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
-	// TODO: document handedness, clip space z range and reverse z; add options for each config
+	// TODO: document/standardize clip space z range and reverse z
 	state.camera_perspective = linalg.matrix4_infinite_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, flip_z_axis = false)
+	//state.camera_perspective[1, 1] = -state.camera_perspective[1, 1] // flip y
 	// NOTE: Any reason not to use an infinite far clip?
 	//state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = false)
 	state.camera_pv = state.camera_perspective * state.camera_view
@@ -332,16 +350,20 @@ step :: proc(state: ^State, dt: f32) {
 
 	// draw final output of post-processing stack
 	draw_postprocess(state)
-	draw_particles(state)
+
+	// Opaque
 
 	// draw reference cube at world origin
 	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
 	// Solution might involve stencil buffer
-	// sg.apply_pipeline(state.solid_pipeline)
-	// sg.apply_bindings(state.solid_bindings)
-	// cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
-	// sg.apply_uniforms(0, range_from_type(&cube_uniforms))
-	// sg.draw(0, 36, 1)
+	sg.apply_pipeline(state.solid_pipeline)
+	sg.apply_bindings(state.solid_bindings)
+	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
+	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
+	sg.draw(0, 36, 1)
+
+	// Transparent
+	draw_particles(state)
 
 	strings.builder_reset(&state.chalkboard.text_boxes[1].text)
 	write_clockstring_from_seconds(&state.chalkboard.text_boxes[1].text, state.world.time)
@@ -926,11 +948,11 @@ draw_postprocess :: proc(state: ^State) {
 /* Action callbacks */
 
 move_forward :: proc(state: ^State) {
-    state.camera.velocity.z = 1
+    state.camera.velocity.y = 1
 }
 
 move_back :: proc(state: ^State) {
-    state.camera.velocity.z = -1
+    state.camera.velocity.y = -1
 }
 
 move_left :: proc(state: ^State) {
@@ -942,35 +964,35 @@ move_right :: proc(state: ^State) {
 }
 
 move_up :: proc(state: ^State) {
-    state.camera.velocity.y = 1
+    state.camera.velocity.z = 1
 }
 
 move_down :: proc(state: ^State) {
-    state.camera.velocity.y = -1
+    state.camera.velocity.z = -1
 }
 
 yaw_left :: proc(state: ^State) {
-    state.camera.angular_velocity.y = -1
+    state.camera.angular_velocity.z = 1
 }
 
 yaw_right :: proc(state: ^State) {
-    state.camera.angular_velocity.y = 1
-}
-
-pitch_up :: proc(state: ^State) {
-    state.camera.angular_velocity.x = -1
-}
-
-pitch_down :: proc(state: ^State) {
-    state.camera.angular_velocity.x = 1
-}
-
-roll_left :: proc(state: ^State) {
     state.camera.angular_velocity.z = -1
 }
 
+pitch_up :: proc(state: ^State) {
+    state.camera.angular_velocity.x = 1
+}
+
+pitch_down :: proc(state: ^State) {
+    state.camera.angular_velocity.x = -1
+}
+
+roll_left :: proc(state: ^State) {
+    state.camera.angular_velocity.y = -1
+}
+
 roll_right :: proc(state: ^State) {
-    state.camera.angular_velocity.z = 1
+    state.camera.angular_velocity.y = 1
 }
 
 zoom_in :: proc(state: ^State) {
