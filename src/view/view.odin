@@ -132,7 +132,7 @@ Vec3 :: [3]f32
 Vec4 :: [4]f32
 Color :: [4]f32
 Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
-Transform :: matrix[4, 4]f32 // z-up, right-handed coordinate system
+Transform :: matrix[4, 4]f32 // using z-up, right-handed coordinate system
 
 // TODO: embed in view state
 shapes: Shapes
@@ -142,11 +142,11 @@ init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
 
 	state.camera = {
-	    position = {0, -20, 0},
+	    position = {0, -20, 5},
 	    near_clip = 0.1,
 		fov = math.PI / 4.0,
 	}
-	// Identity rotation is towards +z
+	// Identity rotation is towards +y
 	state.camera.rotation = 1//linalg.quaternion_angle_axis_f32(-math.PI / 1.0, {1, 0, 0})
 
 	state.sim_scale = 1e-10
@@ -264,47 +264,39 @@ step :: proc(state: ^State, dt: f32) {
 
 	move_speed: f32 = 40.0
 	rotate_speed: f32 = 1.0
-	//state.camera.position.z = -2.0 + math.sin_f32(f32(state.frame) / 120.0)
-	state.camera.position += state.camera.velocity * move_speed * dt
-	//state.camera.rotation = linalg.quaternion_look_at_f32(state.camera.position, 0, {0, 1, 0})
-	state.camera.velocity = 0
+	r, f, u: Vec3
+	// These 3 lines define what the identity orientation means in world space
+	// In this case, forward is +y, up is +z, and right is +x, corresponding to the right-hand z-up convention
+	f = linalg.mul(state.camera.rotation, Vec3{0, 1, 0})
+	u = linalg.mul(state.camera.rotation, Vec3{0, 0, 1})
+	r = linalg.cross(f, u) // For this purpose, equivalent to linalg.mul(state.camera.rotation, Vec3{1, 0, 0})
 	// Make quaternion from each angle-axis rotation
 	rotate_delta := state.camera.angular_velocity * rotate_speed * dt
-	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, {1, 0, 0})
-	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.y, {0, 1, 0})
-	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.z, {0, 0, 1})
-	// Make rotation matrix from combined quaternions (multiply them all together)
+	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, r)
+	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.y, f)
+	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.z, u)
+	// Rotate by each axis rotation with quaternion multiplication
 	state.camera.rotation = q_yaw * q_roll * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
+	state.camera.position += linalg.mul(state.camera.rotation, state.camera.velocity) * move_speed * dt
+	state.camera.velocity = 0
+
 	// manual lookAt matrix construction
-	r, f, u: Vec3
-	f = linalg.mul(state.camera.rotation, Vec3{0, 1, 0})
-	//u = linalg.mul(linalg.quaternion_angle_axis_f32(math.PI / 2.0, {1, 0, 0}), f)
-	r = linalg.normalize(linalg.cross(f, Vec3{0, 0, 1}))
-	u = linalg.cross(r, f)
 	look_at := Transform{
 	    r.x, r.y, r.z, 0,
 		u.x, u.y, u.z, 0,
 		f.x, f.y, f.z, 0,
 		0,   0,   0,   1,
 	}
-	look_at = linalg.transpose(look_at)
+	// TODO: figure out why this transpose has the effect that it does
+	// No transpose: rotation controls map as expected, but apply over world-space axies, not view-space
+	// Transpose: roll and yaw are reversed and flipped, but all rotation controls apply in camera space
+	//look_at = linalg.transpose(look_at)
 
-	state.camera_view =
-        look_at *
-		//linalg.matrix4_from_quaternion_f32(state.camera.rotation)*
-		//linalg.matrix4_look_at_f32(0, f, {0, 0, 1}, false) *
-	    linalg.matrix4_translate_f32(-state.camera.position)
-		//linalg.matrix4_look_at_from_fru_f32(state.camera.position, f, r, u, false)
-		//linalg.matrix4_look_at_f32(state.camera.position, state.camera.position + f, {0, 0, 1}, false)
-
-	//cam_view := linalg.matrix4_look_at_f32(state.camera.position, 0, {0, 1, 0})
+	state.camera_view = look_at * linalg.matrix4_translate_f32(-state.camera.position)
 	// TODO: document/standardize clip space z range and reverse z
 	state.camera_perspective = linalg.matrix4_infinite_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, flip_z_axis = false)
-	//state.camera_perspective[1, 1] = -state.camera_perspective[1, 1] // flip y
-	// NOTE: Any reason not to use an infinite far clip?
-	//state.camera_perspective = linalg.matrix4_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, state.camera.far_clip, flip_z_axis = false)
 	state.camera_pv = state.camera_perspective * state.camera_view
 
 	// Offscreen pass, anything drawn here will have post-processing applied later
@@ -356,11 +348,11 @@ step :: proc(state: ^State, dt: f32) {
 	// draw reference cube at world origin
 	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
 	// Solution might involve stencil buffer
-	sg.apply_pipeline(state.solid_pipeline)
-	sg.apply_bindings(state.solid_bindings)
-	cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
-	sg.apply_uniforms(0, range_from_type(&cube_uniforms))
-	sg.draw(0, 36, 1)
+	// sg.apply_pipeline(state.solid_pipeline)
+	// sg.apply_bindings(state.solid_bindings)
+	// cube_uniforms := Solid_Uniforms{pv = state.camera_pv, m = 1}
+	// sg.apply_uniforms(0, range_from_type(&cube_uniforms))
+	// sg.draw(0, 36, 1)
 
 	// Transparent
 	draw_particles(state)
