@@ -58,6 +58,11 @@ get_counter :: sdl2.GetPerformanceCounter
 
 Event_Handler :: proc(event: ^Event, user_data: rawptr)
 Get_Keyboard_State :: sdl2.GetKeyboardStateAsSlice
+Get_Mouse_State :: proc() -> (x, y: i32) {
+    cx, cy: c.int
+    sdl2.GetMouseState(&cx, &cy)
+    return i32(cx), i32(cy)
+}
 
 window_init :: proc(initialized_callback: proc(user_data: rawptr, device: rawptr), user_data: rawptr) {
     ctx = context

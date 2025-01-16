@@ -4,8 +4,8 @@ import sa "core:container/small_array"
 
 import "../platform"
 
-Mouse_Button :: enum {
-    LEFT = 1,
+Mouse_Button :: enum u8 {
+    LEFT = 0,
     RIGHT,
     MIDDLE,
     BUTTON_4,
@@ -13,7 +13,10 @@ Mouse_Button :: enum {
 }
 
 Pointer :: struct {
-    x, y, dx, dy: i32
+    // TODO TEMP: would like mouse buttons, controller buttons, and keys to be handled the same way
+    left, right: bool,
+    x, y, dx, dy: i32,
+    last_x, last_y: i32,
 }
 
 Keybind :: struct {
@@ -47,8 +50,12 @@ handle_event :: proc(event: ^platform.Event, user_data: rawptr) {
 		pointer.dy = event.motion.yrel
 	case .MOUSEBUTTONDOWN:
 	    // TODO
+		if event.button.button == 1 do pointer.left = true
+		if event.button.button == 3 do pointer.right = true
 	case .MOUSEBUTTONUP:
 	    // TODO
+		if event.button.button == 1 do pointer.left = false
+		if event.button.button == 3 do pointer.right = false
 	}
 }
 
@@ -62,6 +69,11 @@ handle_input_state :: proc(state: ^State) {
 			}
 		}
 	}
+	pointer.x, pointer.y = platform.Get_Mouse_State()
+	pointer.dx = pointer.x - pointer.last_x
+	pointer.dy = pointer.y - pointer.last_y
+	pointer.last_x = pointer.x
+	pointer.last_y = pointer.y
 }
 
 register_keybind :: proc(keybind: Keybind) {

@@ -264,12 +264,19 @@ step :: proc(state: ^State, dt: f32) {
 
 	move_speed: f32 = 40.0
 	rotate_speed: f32 = 1.0
+	look_speed: f32 = 0.2
 	r, f, u: Vec3
 	// These 3 lines define what the identity orientation means in world space
 	// In this case, forward is +y, up is +z, and right is +x, corresponding to the right-hand z-up convention
 	f = linalg.mul(state.camera.rotation, Vec3{0, 1, 0})
 	u = linalg.mul(state.camera.rotation, Vec3{0, 0, 1})
 	r = linalg.cross(f, u) // For this purpose, equivalent to linalg.mul(state.camera.rotation, Vec3{1, 0, 0})
+
+	// TEMP: directly read mouse for pitch and yaw controls
+	if pointer.left {
+	    state.camera.angular_velocity += {f32(pointer.dy), 0, f32(pointer.dx)} * look_speed
+	}
+
 	// Make quaternion from each angle-axis rotation
 	rotate_delta := state.camera.angular_velocity * rotate_speed * dt
 	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, r)
