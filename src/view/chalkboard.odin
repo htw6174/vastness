@@ -212,7 +212,7 @@ test_setup :: proc(cb: ^Chalkboard_State) {
 			av = .TOP,
 		},
 		color = {1, 1, 1, 1},
-		rect = {8, 80, 400, 460},
+		rect = {8, 120, 400, 460},
 		scale = 1,
 	}
 	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move\nClick+drag or\nQ/A/W/R/C/V: Rotate\nZ/X: Change scale\nB: toggle blur\nSpace: play/pause\n[/]: Change sim timescale\n-/=: Change sim steps per second\nPress ` to make this\ntext box active.")
@@ -228,7 +228,7 @@ test_setup :: proc(cb: ^Chalkboard_State) {
 			av = .TOP,
 		},
 		color = {1, 1, 1, 1},
-		rect = {8, 8, 1000, 80},
+		rect = {8, 8, 1000, 400},
 		scale = 2,
 	}
 

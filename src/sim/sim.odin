@@ -67,7 +67,7 @@ init :: proc(world: ^World) {
         // sun
         append(&world.bodies, Body{
             mass = 1.989e30,
-            radius = 139.3e6 / 2.0, // Artifically small for appearance
+            radius = 139.3e6,
             hue = 0.2,
         })
         mercury := body_from_orbit(57.909e9, 47.36e3, 0)

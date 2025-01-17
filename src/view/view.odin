@@ -125,6 +125,7 @@ Camera :: struct {
     angular_velocity: Vec3,
     fov: f32,
     near_clip: f32,
+    move_speed: f32,
 }
 
 Vec2 :: [2]f32
@@ -145,6 +146,7 @@ init :: proc(state: ^State) {
 	    position = {0, -20, 5},
 	    near_clip = 0.1,
 		fov = math.PI / 4.0,
+		move_speed = 40.0
 	}
 	// Identity rotation is towards +y
 	state.camera.rotation = 1//linalg.quaternion_angle_axis_f32(-math.PI / 1.0, {1, 0, 0})
@@ -162,12 +164,18 @@ init :: proc(state: ^State) {
 	register_keybind({.F, .HOLD, move_right})
 	register_keybind({.T, .HOLD, move_up})
 	register_keybind({.G, .HOLD, move_down})
-	register_keybind({.Q, .HOLD, pitch_up})
-	register_keybind({.A, .HOLD, pitch_down})
-	register_keybind({.W, .HOLD, yaw_left})
-	register_keybind({.R, .HOLD, yaw_right})
+	register_keybind({.Q,     .HOLD, pitch_up})
+	register_keybind({.UP,    .HOLD, pitch_up})
+	register_keybind({.A,     .HOLD, pitch_down})
+	register_keybind({.DOWN,  .HOLD, pitch_down})
+	register_keybind({.W,     .HOLD, yaw_left})
+	register_keybind({.LEFT,  .HOLD, yaw_left})
+	register_keybind({.R,     .HOLD, yaw_right})
+	register_keybind({.RIGHT, .HOLD, yaw_right})
 	register_keybind({.C, .HOLD, roll_left})
 	register_keybind({.V, .HOLD, roll_right})
+	register_keybind({.PAGEUP, .HOLD, accelerate})
+	register_keybind({.PAGEDOWN, .HOLD, decelerate})
 	register_keybind({.Z, .HOLD, zoom_in})
 	register_keybind({.X, .HOLD, zoom_out})
 	register_keybind({.B, .PRESS, toggle_bloom})
@@ -262,7 +270,6 @@ step :: proc(state: ^State, dt: f32) {
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 	state.canvas_pv = canvas_perspective * canvas_view
 
-	move_speed: f32 = 40.0
 	rotate_speed: f32 = 1.0
 	look_speed: f32 = 0.2
 	r, f, u: Vec3
@@ -286,10 +293,11 @@ step :: proc(state: ^State, dt: f32) {
 	state.camera.rotation = q_yaw * q_roll * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
-	state.camera.position += linalg.mul(state.camera.rotation, state.camera.velocity) * move_speed * dt
+	state.camera.position += linalg.mul(state.camera.rotation, state.camera.velocity) * state.camera.move_speed * dt
 	state.camera.velocity = 0
 
 	// manual lookAt matrix construction
+	// TODO: test assumption: the order of these rows determine what axies correspond to up, right, and depth in view space
 	look_at := Transform{
 	    r.x, r.y, r.z, 0,
 		u.x, u.y, u.z, 0,
@@ -315,17 +323,22 @@ step :: proc(state: ^State, dt: f32) {
 	// Add asteroids to point buffer
 	// TODO: use real body size as radius
 	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
-	radius_scale_bias := 1.0e3
+	frustrum_half_height := (1.0 / state.camera_perspective[1, 1])
 	clear(&state.point_instances)
 	clear(&state.particle_instances)
 	for body, i in state.world.bodies {
+	    view_pos := view_position_from_body(body, state.sim_scale, state.camera_view)
 	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, 1, 0.5)
-		r_apparant := state.sim_scale * radius_scale_bias * body.radius
-		if i <= state.world.massive_bodies { // particle
-		    append(&state.particle_instances, Particle_Instance{position_from_body(body, state.sim_scale), f32(r_apparant), tint})
+		radius := f32(body.radius * state.sim_scale)
+
+		perspective_scale := state.camera.near_clip / view_pos.z
+		pixels_near := (radius / frustrum_half_height) * f32(height)
+		pixel_size := pixels_near * perspective_scale
+		if pixel_size > 1.0 { // particle
+		    append(&state.particle_instances, Particle_Instance{view_pos, radius, tint})
 		} else { // point
 		    //tint.rgb *= f32(r_apparant)
-	        append(&state.point_instances, Point_Instance{position_from_body(body, state.sim_scale), tint})
+	        append(&state.point_instances, Point_Instance{view_pos, tint})
 		}
 	}
 	if len(state.point_instances) > 0 {
@@ -367,7 +380,10 @@ step :: proc(state: ^State, dt: f32) {
 	strings.builder_reset(&state.chalkboard.text_boxes[1].text)
 	write_clockstring_from_seconds(&state.chalkboard.text_boxes[1].text, state.world.time)
 	strings.write_rune(&state.chalkboard.text_boxes[1].text, '\n')
-	fmt.sbprintf(&state.chalkboard.text_boxes[1].text, "running %.0f steps/second; %d sim seconds/step", 1.0 / state.world.step_frequency_inv, state.world.time_step)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "running %.0f steps/second; %d sim seconds/step", 1.0 / state.world.step_frequency_inv, state.world.time_step)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Visualization scale: %.3e", state.sim_scale)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative move speed: %.3em/s", state.camera.move_speed)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "System position: %.3v", state.camera.position)
 
 	// draw 2D UI over everything else
 	draw_ui(state)
@@ -994,6 +1010,18 @@ roll_right :: proc(state: ^State) {
     state.camera.angular_velocity.y = 1
 }
 
+accelerate :: proc(state: ^State) {
+    log_scale := math.log10(state.camera.move_speed)
+    log_scale += 0.01
+    state.camera.move_speed = math.pow(10.0, log_scale)
+}
+
+decelerate :: proc(state: ^State) {
+    log_scale := math.log10(state.camera.move_speed)
+    log_scale -= 0.01
+    state.camera.move_speed = math.pow(10.0, log_scale)
+}
+
 zoom_in :: proc(state: ^State) {
     log_scale := math.log10_f64(state.sim_scale)
     log_scale -= 0.01
@@ -1059,4 +1087,10 @@ range_from_slice :: proc(s: []$T) -> sg.Range {
 position_from_body :: proc(body: sim.Body, vis_scale: f64) -> Vec3 {
     scaled := body.position * vis_scale
     return Vec3{f32(scaled.x), f32(scaled.y), f32(scaled.z)}
+}
+
+// TODO: since I'm premultiplying view anyway, is there a possible advantage to multiplying sim position with an f64 view matrix?
+view_position_from_body :: proc(body: sim.Body, vis_scale: f64, view: Transform) -> Vec3 {
+    scaled := body.position * vis_scale
+    return (view * Vec4{f32(scaled.x), f32(scaled.y), f32(scaled.z), 1}).xyz
 }
