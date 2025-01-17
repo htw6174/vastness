@@ -118,18 +118,22 @@ Color_Correct_Uniforms :: struct {
     exposure: f32,
 }
 
+// Sim objects are shifted into camera-relative space before any other operations are done, so high view precision is needed only in camera position
 Camera :: struct {
-    position: Vec3,
-    velocity: Vec3,
+    position: Double3,
+    velocity: Double3,
     rotation: quaternion128,
     angular_velocity: Vec3,
     fov: f32,
     near_clip: f32,
-    move_speed: f32,
+    move_speed: f64,
+    rotate_speed: f32,
+	look_speed: f32,
 }
 
 Vec2 :: [2]f32
 Vec3 :: [3]f32
+Double3 :: [3]f64
 Vec4 :: [4]f32
 Color :: [4]f32
 Rect :: [4]f32 // .xy => position of top-left corner, .zw => width, height
@@ -143,15 +147,18 @@ init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
 
 	state.camera = {
-	    position = {0, -20, 5},
+	    position = {0, -20e10, 10e10},
 	    near_clip = 0.1,
 		fov = math.PI / 4.0,
-		move_speed = 40.0
+		move_speed = 40.0e10,
+		rotate_speed = 1.0,
+		look_speed = 0.2,
 	}
 	// Identity rotation is towards +y
-	state.camera.rotation = 1//linalg.quaternion_angle_axis_f32(-math.PI / 1.0, {1, 0, 0})
+	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 3.0, {1, 0, 0})
 
-	state.sim_scale = 1e-10
+	// Maybe don't need this anymore, now that my position precision problem is solved
+	state.sim_scale = 1.0//e-10
 	state.bloom_enabled = true
 	state.bloom_iters = 4
 
@@ -270,8 +277,6 @@ step :: proc(state: ^State, dt: f32) {
 	canvas_perspective := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
 	state.canvas_pv = canvas_perspective * canvas_view
 
-	rotate_speed: f32 = 1.0
-	look_speed: f32 = 0.2
 	r, f, u: Vec3
 	// These 3 lines define what the identity orientation means in world space
 	// In this case, forward is +y, up is +z, and right is +x, corresponding to the right-hand z-up convention
@@ -281,19 +286,19 @@ step :: proc(state: ^State, dt: f32) {
 
 	// TEMP: directly read mouse for pitch and yaw controls
 	if pointer.left {
-	    state.camera.angular_velocity += {f32(pointer.dy), 0, f32(pointer.dx)} * look_speed
+	    state.camera.angular_velocity += {f32(pointer.dy), 0, f32(pointer.dx)} * state.camera.look_speed
 	}
 
 	// Make quaternion from each angle-axis rotation
-	rotate_delta := state.camera.angular_velocity * rotate_speed * dt
-	q_pitch := linalg.quaternion_angle_axis_f32(rotate_delta.x, r)
-	q_roll := linalg.quaternion_angle_axis_f32(rotate_delta.y, f)
-	q_yaw := linalg.quaternion_angle_axis_f32(rotate_delta.z, u)
+	rotate_delta := state.camera.angular_velocity * state.camera.rotate_speed * dt
+	q_pitch := linalg.quaternion_angle_axis(rotate_delta.x, r)
+	q_roll := linalg.quaternion_angle_axis(rotate_delta.y, f)
+	q_yaw := linalg.quaternion_angle_axis(rotate_delta.z, u)
 	// Rotate by each axis rotation with quaternion multiplication
 	state.camera.rotation = q_yaw * q_roll * q_pitch * state.camera.rotation
 	state.camera.angular_velocity = 0
 
-	state.camera.position += linalg.mul(state.camera.rotation, state.camera.velocity) * state.camera.move_speed * dt
+	state.camera.position += state.camera.move_speed * linalg.mul(quaternion256(state.camera.rotation), state.camera.velocity) * f64(dt)
 	state.camera.velocity = 0
 
 	// manual lookAt matrix construction
@@ -309,7 +314,8 @@ step :: proc(state: ^State, dt: f32) {
 	// Transpose: roll and yaw are reversed and flipped, but all rotation controls apply in camera space
 	//look_at = linalg.transpose(look_at)
 
-	state.camera_view = look_at * linalg.matrix4_translate_f32(-state.camera.position)
+	// Translation to camera-relative coords is done when converting from sim space, so no translation is necessary in the view transform
+	state.camera_view = look_at// * linalg.matrix4_translate_f32(-state.camera.position)
 	// TODO: document/standardize clip space z range and reverse z
 	state.camera_perspective = linalg.matrix4_infinite_perspective_f32(state.camera.fov, f32(width) / f32(height), state.camera.near_clip, flip_z_axis = false)
 	state.camera_pv = state.camera_perspective * state.camera_view
@@ -327,7 +333,7 @@ step :: proc(state: ^State, dt: f32) {
 	clear(&state.point_instances)
 	clear(&state.particle_instances)
 	for body, i in state.world.bodies {
-	    view_pos := view_position_from_body(body, state.sim_scale, state.camera_view)
+	    view_pos := view_position_from_body(body, state.sim_scale, state.camera.position, state.camera_view)
 	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, 1, 0.5)
 		radius := f32(body.radius * state.sim_scale)
 
@@ -1090,7 +1096,7 @@ position_from_body :: proc(body: sim.Body, vis_scale: f64) -> Vec3 {
 }
 
 // TODO: since I'm premultiplying view anyway, is there a possible advantage to multiplying sim position with an f64 view matrix?
-view_position_from_body :: proc(body: sim.Body, vis_scale: f64, view: Transform) -> Vec3 {
-    scaled := body.position * vis_scale
+view_position_from_body :: proc(body: sim.Body, vis_scale: f64, eye: Double3, view: Transform) -> Vec3 {
+    scaled := (body.position - eye) * vis_scale
     return (view * Vec4{f32(scaled.x), f32(scaled.y), f32(scaled.z), 1}).xyz
 }
