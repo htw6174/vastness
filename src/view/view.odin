@@ -75,9 +75,6 @@ State :: struct {
 	bloom_down_pipeline: sg.Pipeline,
 	bloom_up_pipeline: sg.Pipeline,
 	color_correct_pipeline: sg.Pipeline,
-
-	// visualization settings
-	sim_scale: f64 // default should be on the order of 1e-11
 }
 
 Shapes :: struct {
@@ -90,6 +87,7 @@ Shapes :: struct {
 
 Point_Instance :: struct {
     position: Vec3,
+    intensity: f32,
     color: Color,
 }
 
@@ -147,18 +145,16 @@ init :: proc(state: ^State) {
     platform.window_init(_late_init, state)
 
 	state.camera = {
-	    position = {0, -20e10, 10e10},
+	    position = {0, -40e11, 20e11},
 	    near_clip = 0.1,
 		fov = math.PI / 4.0,
-		move_speed = 40.0e10,
+		move_speed = 2.0e11,
 		rotate_speed = 1.0,
 		look_speed = 0.2,
 	}
 	// Identity rotation is towards +y
-	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 3.0, {1, 0, 0})
+	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 6.0, {1, 0, 0})
 
-	// Maybe don't need this anymore, now that my position precision problem is solved
-	state.sim_scale = 1.0//e-10
 	state.bloom_enabled = true
 	state.bloom_iters = 4
 
@@ -183,8 +179,6 @@ init :: proc(state: ^State) {
 	register_keybind({.V, .HOLD, roll_right})
 	register_keybind({.PAGEUP, .HOLD, accelerate})
 	register_keybind({.PAGEDOWN, .HOLD, decelerate})
-	register_keybind({.Z, .HOLD, zoom_in})
-	register_keybind({.X, .HOLD, zoom_out})
 	register_keybind({.B, .PRESS, toggle_bloom})
 	register_keybind({.SPACE, .PRESS, sim_toggle_play})
 	register_keybind({.LEFTBRACKET, .PRESS, sim_decrease_speed})
@@ -327,15 +321,15 @@ step :: proc(state: ^State, dt: f32) {
 	})
 
 	// Add asteroids to point buffer
-	// TODO: use real body size as radius
-	// - Scale radius by sim_scale: if under some threshold, render as a point; else render as a particle.
 	frustrum_half_height := (1.0 / state.camera_perspective[1, 1])
 	clear(&state.point_instances)
 	clear(&state.particle_instances)
 	for body, i in state.world.bodies {
-	    view_pos := view_position_from_body(body, state.sim_scale, state.camera.position, state.camera_view)
-	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, 1, 0.5)
-		radius := f32(body.radius * state.sim_scale)
+	    view_pos := view_position_from_body(body, state.camera.position, state.camera_view)
+		saturation: f32 = 1.0 if i <= 10 else 0.65
+		lightness: f32 = 0.5 if i <= 10 else 0.25
+	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, saturation, lightness)
+		radius := f32(body.radius)
 
 		perspective_scale := state.camera.near_clip / view_pos.z
 		pixels_near := (radius / frustrum_half_height) * f32(height)
@@ -343,8 +337,7 @@ step :: proc(state: ^State, dt: f32) {
 		if pixel_size > 1.0 { // particle
 		    append(&state.particle_instances, Particle_Instance{view_pos, radius, tint})
 		} else { // point
-		    //tint.rgb *= f32(r_apparant)
-	        append(&state.point_instances, Point_Instance{view_pos, tint})
+	        append(&state.point_instances, Point_Instance{view_pos, math.log2(radius) * 1000.0, tint})
 		}
 	}
 	if len(state.point_instances) > 0 {
@@ -370,6 +363,7 @@ step :: proc(state: ^State, dt: f32) {
 	draw_postprocess(state)
 
 	// Opaque
+	draw_particles(state)
 
 	// draw reference cube at world origin
 	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
@@ -381,15 +375,13 @@ step :: proc(state: ^State, dt: f32) {
 	// sg.draw(0, 36, 1)
 
 	// Transparent
-	draw_particles(state)
 
 	strings.builder_reset(&state.chalkboard.text_boxes[1].text)
 	write_clockstring_from_seconds(&state.chalkboard.text_boxes[1].text, state.world.time)
 	strings.write_rune(&state.chalkboard.text_boxes[1].text, '\n')
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "running %.0f steps/second; %d sim seconds/step", 1.0 / state.world.step_frequency_inv, state.world.time_step)
-	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Visualization scale: %.3e", state.sim_scale)
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative move speed: %.3em/s", state.camera.move_speed)
-	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "System position: %.3v", state.camera.position)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative position: %.3v", state.camera.position)
 
 	// draw 2D UI over everything else
 	draw_ui(state)
@@ -608,7 +600,8 @@ state_init_points :: proc(state: ^State) {
         layout = {
             attrs = {
                 0 = {format = .FLOAT3},
-                1 = {format = .FLOAT4},
+                1 = {format = .FLOAT},
+                2 = {format = .FLOAT4},
             }
         },
         colors = {
@@ -1028,18 +1021,6 @@ decelerate :: proc(state: ^State) {
     state.camera.move_speed = math.pow(10.0, log_scale)
 }
 
-zoom_in :: proc(state: ^State) {
-    log_scale := math.log10_f64(state.sim_scale)
-    log_scale -= 0.01
-    state.sim_scale = math.pow_f64(10.0, log_scale)
-}
-
-zoom_out :: proc(state: ^State) {
-    log_scale := math.log10_f64(state.sim_scale)
-    log_scale += 0.01
-    state.sim_scale = math.pow_f64(10.0, log_scale)
-}
-
 toggle_bloom :: proc(state: ^State) {
     state.bloom_enabled = !state.bloom_enabled
 }
@@ -1096,7 +1077,7 @@ position_from_body :: proc(body: sim.Body, vis_scale: f64) -> Vec3 {
 }
 
 // TODO: since I'm premultiplying view anyway, is there a possible advantage to multiplying sim position with an f64 view matrix?
-view_position_from_body :: proc(body: sim.Body, vis_scale: f64, eye: Double3, view: Transform) -> Vec3 {
-    scaled := (body.position - eye) * vis_scale
-    return (view * Vec4{f32(scaled.x), f32(scaled.y), f32(scaled.z), 1}).xyz
+view_position_from_body :: proc(body: sim.Body, eye: Double3, view: Transform) -> Vec3 {
+    rel := body.position - eye
+    return (view * Vec4{f32(rel.x), f32(rel.y), f32(rel.z), 1}).xyz
 }

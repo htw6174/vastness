@@ -1,6 +1,7 @@
 struct Instance {
     @location(0) position: vec3<f32>,
-    @location(1) color: vec4<f32>,
+    @location(1) intensity: f32,
+    @location(2) color: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -23,9 +24,7 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
     let c_pos = uni.p * v_pos;
     let dist_ratio = uni.p[2][3] / log(v_pos.z);
     let scale = dist_ratio;
-    // TODO: make instance field
-    let intensity = 10000.0;
     output.position = c_pos;
-    output.tint     = vec4<f32>(inst.color.rgb * scale * intensity, inst.color.a);
+    output.tint     = vec4<f32>(inst.color.rgb * scale * inst.intensity, inst.color.a);
     return output;
 }
