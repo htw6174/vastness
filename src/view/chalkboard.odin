@@ -215,7 +215,7 @@ test_setup :: proc(cb: ^Chalkboard_State) {
 		rect = {8, 120, 400, 460},
 		scale = 1,
 	}
-	strings.write_string(&entry_box.text, "E/S/D/F/T/G: Move\nClick+drag, arrow keys, or\nQ/A/W/R/C/V: Rotate\nPage up/down: Change speed\nB: toggle blur\nSpace: play/pause\n[/]: Change sim timescale\n-/=: Change sim steps per second\nPress ` to make this\ntext box active.")
+	strings.write_string(&entry_box.text, "E/S/D/F/Q/A: Move\nClick+drag, arrow keys, or\nW/R/T/G/C/V: Rotate\nZ/X or PgUp/PgDn: Change speed\nB: toggle blur\nSpace: play/pause\n[/]: Change sim timescale\n-/=: Change sim steps per second\nPress ` to make this\ntext box active.")
 	cb.text_boxes[0] = entry_box
 
 	stats_box := Text_Box {
