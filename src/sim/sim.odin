@@ -119,15 +119,16 @@ init :: proc(world: ^World) {
         world.massive_bodies = len(world.bodies)
     }
 
-    inner_r, outer_r := 227.923e9, 778.570e9
-    inner_v, outer_v := 29.78e3, 13.0e3
+    // range from innermost to outermost planet
+    inner_r, outer_r := 57.909e9, 4495.060e9 //227.923e9, 778.570e9
+    primary_mass := world.bodies[0].mass
     min_d, max_d := 10.0, 1000.0 // size of asteroids
     max_elevation := 100000.0
     for i in 0..<4096 {
         r := rand.float64()
-        r = r*r // square to get uniform density within circle
-        v := math.lerp(inner_v, outer_v, r) // small radius => high velocity
+        r = math.sqrt(r) // squareroot to get uniform density within circle
         r = math.lerp(inner_r, outer_r, r)
+        v := orbit_velocity_from_radius_and_mass(r, primary_mass)
         theta := rand.float64() * math.TAU // random progression along orbit
         asteroid := body_from_orbit(r, v, theta)
         asteroid.position.z = rand.float64_range(-max_elevation, max_elevation)
@@ -187,4 +188,8 @@ body_from_orbit :: proc(radius, velocity, theta: f64) -> Body {
         position = {math.cos(theta) * radius, math.sin(theta) * radius, 0},
         velocity = {-math.sin(theta) * velocity, math.cos(theta) * velocity, 0},
     }
+}
+
+orbit_velocity_from_radius_and_mass :: proc(radius: f64, primary_mass: f64) -> f64 {
+    return math.sqrt(BIG_G * primary_mass / radius)
 }

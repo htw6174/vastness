@@ -127,6 +127,7 @@ Camera :: struct {
     move_speed: f64,
     rotate_speed: f32,
 	look_speed: f32,
+	exposure: f32,
 }
 
 Vec2 :: [2]f32
@@ -151,6 +152,7 @@ init :: proc(state: ^State) {
 		move_speed = 2.0e11,
 		rotate_speed = 1.0,
 		look_speed = 0.2,
+		exposure = 1000.0,
 	}
 	// Identity rotation is towards +y
 	state.camera.rotation = linalg.quaternion_angle_axis_f32(-math.PI / 6.0, {1, 0, 0})
@@ -181,6 +183,8 @@ init :: proc(state: ^State) {
 	register_keybind({.PAGEUP,   .HOLD, accelerate})
 	register_keybind({.X,        .HOLD, decelerate})
 	register_keybind({.PAGEDOWN, .HOLD, decelerate})
+	register_keybind({.N, .HOLD, increase_exposure})
+	register_keybind({.M, .HOLD, decrease_exposure})
 	register_keybind({.B, .PRESS, toggle_bloom})
 	register_keybind({.SPACE, .PRESS, sim_toggle_play})
 	register_keybind({.LEFTBRACKET,  .PRESS, sim_decrease_speed})
@@ -328,6 +332,7 @@ step :: proc(state: ^State, dt: f32) {
 	clear(&state.particle_instances)
 	for body, i in state.world.bodies {
 	    view_pos := view_position_from_body(body, state.camera.position, state.camera_view)
+		// Highlight planets, desaturate asteroids
 		saturation: f32 = 1.0 if i <= 10 else 0.65
 		lightness: f32 = 0.5 if i <= 10 else 0.25
 	    tint := linalg.vector4_hsl_to_rgb_f32(body.hue, saturation, lightness)
@@ -338,9 +343,11 @@ step :: proc(state: ^State, dt: f32) {
 		pixel_size := pixels_near * perspective_scale
 		if pixel_size > 1.0 { // particle
 		    append(&state.particle_instances, Particle_Instance{view_pos, radius, tint})
-		} else { // point
-	        append(&state.point_instances, Point_Instance{view_pos, math.log2(radius) * 1000.0, tint})
-		}
+		} //else { // point
+		    // aparant brightness should scale with visible area of body, porportional to PI*r^2
+		    intensity := state.camera.exposure * math.log10(radius*radius) / math.log10(linalg.length(view_pos))
+	        append(&state.point_instances, Point_Instance{view_pos, intensity, tint})
+		//}
 	}
 	if len(state.point_instances) > 0 {
 	    sg.update_buffer(state.point_buffer, range_from_slice(state.point_instances[:]))
@@ -365,7 +372,6 @@ step :: proc(state: ^State, dt: f32) {
 	draw_postprocess(state)
 
 	// Opaque
-	draw_particles(state)
 
 	// draw reference cube at world origin
 	// TODO: any good way to combine 3D with postprocessing from offscreen pass with "plain"/debug 3D in final pass?
@@ -377,6 +383,7 @@ step :: proc(state: ^State, dt: f32) {
 	// sg.draw(0, 36, 1)
 
 	// Transparent
+	draw_particles(state)
 
 	strings.builder_reset(&state.chalkboard.text_boxes[1].text)
 	write_clockstring_from_seconds(&state.chalkboard.text_boxes[1].text, state.world.time)
@@ -384,6 +391,7 @@ step :: proc(state: ^State, dt: f32) {
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "running %.0f steps/second; %d sim seconds/step", 1.0 / state.world.step_frequency_inv, state.world.time_step)
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative move speed: %.3em/s", state.camera.move_speed)
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative position: %.3v", state.camera.position)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Camera exposure: %.3f", state.camera.exposure)
 
 	// draw 2D UI over everything else
 	draw_ui(state)
@@ -761,7 +769,7 @@ state_init_postprocess :: proc(state: ^State) {
 			wrap_v = .CLAMP_TO_EDGE,
 			wrap_w = .CLAMP_TO_EDGE,
 			min_lod = 0,
-			max_lod = 32,
+			max_lod = MAX_RENDER_MIPS,
 			max_anisotropy = 1,
 		},
 	)
@@ -841,7 +849,15 @@ state_init_postprocess :: proc(state: ^State) {
 	})
 	state.bloom_up_pipeline = sg.make_pipeline(sg.Pipeline_Desc{
 	    shader = bloom_up_shader,
-		colors = {0 = {pixel_format = state.offscreen_format}},
+		colors = {0 = {
+		    pixel_format = state.offscreen_format,
+			// Enable additive blending on the up pass to turn the blur effect into a bloom effect
+			// blend = {
+			//     enabled = true,
+			// 	src_factor_rgb = .ONE,
+			// 	dst_factor_rgb = .ONE,
+			// }
+		}},
 		depth = {
 		    pixel_format = .NONE,
 			write_enabled = false,
@@ -895,7 +911,7 @@ draw_points :: proc(state: ^State) {
     sg.apply_pipeline(state.point_pipeline)
     sg.apply_bindings(state.point_bindings)
     uniforms := Particle_Uniforms{view = state.camera_view, perspective = state.camera_perspective}
-    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.apply_uniforms(0, range_from_value(&uniforms))
     sg.draw(0, len(state.point_instances), 1)
 }
 
@@ -903,7 +919,7 @@ draw_particles :: proc(state: ^State) {
     sg.apply_pipeline(state.particle_pipeline)
     sg.apply_bindings(state.particle_bindings)
     uniforms := Particle_Uniforms{view = state.camera_view, perspective = state.camera_perspective}
-    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.apply_uniforms(0, range_from_value(&uniforms))
     sg.draw(0, 6, len(state.particle_instances))
 }
 
@@ -924,7 +940,7 @@ postprocess_bloom :: proc(state: ^State) {
         bindings.images[0] = state.offscreen_targets[source]
         sg.apply_bindings(bindings)
         uniforms.level = f32(i)
-        sg.apply_uniforms(0, range_from_type(&uniforms))
+        sg.apply_uniforms(0, range_from_value(&uniforms))
         sg.draw(0, 6, 1)
         sg.end_pass()
         dest = source
@@ -941,7 +957,7 @@ postprocess_bloom :: proc(state: ^State) {
         bindings.images[0] = state.offscreen_targets[source]
         sg.apply_bindings(bindings)
         uniforms.level = f32(i)
-        sg.apply_uniforms(0, range_from_type(&uniforms))
+        sg.apply_uniforms(0, range_from_value(&uniforms))
         sg.draw(0, 6, 1)
         sg.end_pass()
         dest = source
@@ -956,7 +972,7 @@ draw_postprocess :: proc(state: ^State) {
     state.postprocess_bindings.images[0] = state.offscreen_targets[state.offscreen_source_index]
     sg.apply_bindings(state.postprocess_bindings)
     uniforms := Color_Correct_Uniforms{exposure = 1.0}//math.sin(f32(state.frame) / 60.0) * 0.5 + 0.5}
-    sg.apply_uniforms(0, range_from_type(&uniforms))
+    sg.apply_uniforms(0, range_from_value(&uniforms))
     sg.draw(0, 6, 1)
 }
 
@@ -1023,6 +1039,18 @@ decelerate :: proc(state: ^State) {
     state.camera.move_speed = math.pow(10.0, log_scale)
 }
 
+increase_exposure :: proc(state: ^State) {
+    log_scale := math.log10(state.camera.exposure)
+    log_scale += 1.0/60.0
+    state.camera.exposure = math.pow(10.0, log_scale)
+}
+
+decrease_exposure :: proc(state: ^State) {
+    log_scale := math.log10(state.camera.exposure)
+    log_scale -= 1.0/60.0
+    state.camera.exposure = math.pow(10.0, log_scale)
+}
+
 toggle_bloom :: proc(state: ^State) {
     state.bloom_enabled = !state.bloom_enabled
 }
@@ -1062,7 +1090,7 @@ sim_decrease_freq :: proc(state: ^State) {
 
 /* Sokol utilities */
 
-range_from_type :: proc(t: ^$T) -> sg.Range {
+range_from_value :: proc(t: ^$T) -> sg.Range {
     return sg.Range{t, size_of(T)}
 }
 

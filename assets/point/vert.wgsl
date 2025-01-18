@@ -22,9 +22,9 @@ fn main(@builtin(vertex_index) vertex: u32, inst: Instance) -> VertexOutput {
 
     let v_pos = vec4<f32>(inst.position, 1);
     let c_pos = uni.p * v_pos;
-    let dist_ratio = uni.p[2][3] / log(v_pos.z);
+    let dist_ratio = 1.495979e+11 / v_pos.z; // distance basis of 1 AU
     let scale = dist_ratio;
     output.position = c_pos;
-    output.tint     = vec4<f32>(inst.color.rgb * scale * inst.intensity, inst.color.a);
+    output.tint     = vec4<f32>(inst.color.rgb * inst.intensity, inst.color.a);
     return output;
 }

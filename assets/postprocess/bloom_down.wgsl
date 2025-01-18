@@ -20,9 +20,7 @@ fn kernel(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // TODO: multi-sample and blend
     let texColor = kernel(uv);
-    //let texColor = textureSample(text, samp, uv);
     let color = vec4<f32>(texColor, 1);
 
     return color;

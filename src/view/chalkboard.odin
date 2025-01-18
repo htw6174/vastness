@@ -277,7 +277,7 @@ draw_chalkboards :: proc(state: ^State) {
     	    state.canvas_pv *
     		linalg.matrix4_translate_f32({text_box.rect.x, text_box.rect.y, 0}) *
     		linalg.matrix4_scale_f32(text_box.scale)
-    	sg.apply_uniforms(0, range_from_type(&text_box.uniforms))
+    	sg.apply_uniforms(0, range_from_value(&text_box.uniforms))
     	sg.draw(0, 6, text_box.instance_count)
     }
 }

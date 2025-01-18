@@ -20,10 +20,9 @@ fn kernel(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // TODO: add previous pass and lower mip
+    // add samples from previous pass and lower mip
     let texColor = kernel(uv);
-    let downColor = textureSampleLevel(text, samp, uv, uni.level - 1.0).rgb;
-    //let texColor = textureSample(text, samp, uv);
+    let downColor = textureSampleLevel(text, samp, uv, uni.level - 1.0).rgb; //vec3<f32>(0);
     let color = vec4<f32>(texColor + downColor, 1);
 
     return color;
