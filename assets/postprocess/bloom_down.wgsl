@@ -14,7 +14,7 @@ fn sample(uv: vec2<f32>) -> vec3<f32> {
 
 fn kernel(uv: vec2<f32>) -> vec3<f32> {
     let d = vec2<f32>(1, 1) / vec2<f32>(textureDimensions(text, i32(uni.level)));
-    let s = sample(uv + d) + sample(uv + vec2f(-d.x, d.y)) + sample(uv + vec2f(d.x , -d.y)) + sample (uv - d);
+    let s = sample(uv + d) + sample(uv + vec2f(-d.x, d.y)) + sample(uv + vec2f(d.x , -d.y)) + sample(uv - d);
     return s * 0.25;
 }
 

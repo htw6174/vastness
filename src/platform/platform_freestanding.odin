@@ -152,7 +152,6 @@ Frame_State :: struct {
     depth_stencil_view: rawptr,
 }
 
-// return true
 frame_begin :: proc() -> Frame_State {
     frame := Frame_State{ready = false}
 	if !state.initialized {

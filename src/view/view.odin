@@ -392,6 +392,7 @@ step :: proc(state: ^State, dt: f32) {
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative move speed: %.3em/s", state.camera.move_speed)
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Sun-relative position: %.3v", state.camera.position)
 	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Camera exposure: %.3f", state.camera.exposure)
+	fmt.sbprintfln(&state.chalkboard.text_boxes[1].text, "Surface size: %vx%v", state.width, state.height)
 
 	// draw 2D UI over everything else
 	draw_ui(state)
@@ -486,13 +487,22 @@ state_init_shapes :: proc() {
 }
 
 offscreen_create :: proc(state: ^State) {
+    width := state.width
+    height := state.height
+    // Early downscales get motion artifacts when texture size is not divisible by 2. Size up to multiple of a small power of 2 to help this effect
+    round_to: i32 = 16
+    w_remainder := state.width % round_to
+    h_remainder := state.height % round_to
+    if w_remainder != 0 do width += (round_to - w_remainder)
+    if h_remainder != 0 do height += (round_to - h_remainder)
     image_desc := sg.Image_Desc{
         render_target = true,
-		width = state.width,
-		height = state.height,
+		width = width,
+		height = height,
 		num_mipmaps = MAX_RENDER_MIPS,
 		pixel_format = state.offscreen_format,
    	}
+    logf("Surface changed, resizing offscreen buffers to %vx%v", image_desc.width, image_desc.height)
 
     state.offscreen_targets[0] = sg.make_image(image_desc)
 	state.offscreen_targets[1] = sg.make_image(image_desc)
